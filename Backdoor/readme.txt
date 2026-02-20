@@ -2,8 +2,6 @@ DKID03 Advanced Offensive Security Toolkit
 
 Untuk Edukasi Cybersecurity & Penetration Testing di Lingkungan Lab
 
-https://img.shields.io/badge/Usage-Educational%20Only-brightgreen
-https://img.shields.io/badge/Lab-Isolated%20Required-red
 
 Peringatan: Alat ini dibuat semata-mata untuk tujuan edukasi dalam lingkungan lab yang terisolasi.
 Penggunaan di sistem produksi atau tanpa izin adalah ilegal dan melanggar hukum. Penulis tidak bertanggung jawab atas penyalahgunaan.
