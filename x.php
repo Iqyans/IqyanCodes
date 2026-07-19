@@ -14,7 +14,7 @@
             --bg-primary: #0b0e14;
             --bg-secondary: #111820;
             --bg-card: #141d2b;
-            --bg-card-hover: #1a2638;
+            --bg-card-hover: #1a2638;y
             --bg-input: #0d1520;
             --bg-glass: rgba(20, 29, 43, 0.75);
             --text-primary: #e8edf5;
